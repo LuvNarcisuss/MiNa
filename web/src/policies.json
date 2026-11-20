@@ -1,0 +1,31 @@
+{
+  "terms": {
+    "title": "MiNa Terms of Use",
+    "sections": [
+      ["Using MiNa", "MiNa offers bedtime voice rooms, a dream journal, a social feed and private conversations. Continue creates a service account or reopens the account on this iPhone. Keep access to your device. Without an account recovery method, losing the device or its account key can prevent access."],
+      ["Sharing responsibly", "Share only content that you own or have permission to use. You give MiNa permission to store and display your contributions for the features and audiences you choose. Do not record or share another person without their permission."],
+      ["Community conduct", "Harassment, threats, sexual exploitation, hateful or violent content, impersonation, spam and unlawful material are prohibited. Use Report to request review and Block to prevent further contact. MiNa may remove content or restrict access when necessary to protect the community."],
+      ["Gifts and coins", "Review the recipient, quantity and price before confirming a gift. Coins and gifts are for use within MiNa. The wallet shows purchase offers only when available. A canceled purchase does not grant coins."],
+      ["Your choices", "You can stop using the app, remove your posts or dreams, block listeners and request account deletion from Profile. For an account or content question, open Profile and choose Contact us."]
+    ]
+  },
+  "privacy": {
+    "title": "MiNa Privacy Policy",
+    "sections": [
+      ["Account and profile", "MiNa creates a persistent account identifier when you continue. Supabase processes sign-in and hosts MiNa's cloud service in Tokyo. Your iPhone stores the session key in Keychain. Nickname, avatar, signature and optional profile information support discovery and social features. Your date of birth is stored separately from your public profile."],
+      ["Content and communication", "Publishing sends the selected recording or video, your caption and account identifier to MiNa. Other signed-in listeners can see published content. Messages are available to conversation participants and authorized service operations. Live calls use signaling and peer audio connections; a peer connection may disclose network addresses to other participants. MiNa uses room attendance, follows, reactions and gift records to provide the features you select."],
+      ["Microphone, media and AI", "Microphone access is requested for recording and speaking. You choose which photos and videos to import. Drafts stay on this device until you publish. On supported iPhones, Apple Intelligence generates MiNa Companion replies on device. The companion does not send your prompt or conversation history to an external inference service. Chat history is stored with your local device library."],
+      ["Control and safety", "Edit your profile and manage visibility, incoming messages and voice calls in Profile. Reports, blocks and support requests are linked to your account for handling. Device permissions can be changed in iPhone Settings. Blocking restricts contact and visibility within MiNa."],
+      ["Retention and deletion", "Cloud content is kept to provide your account and the interactions you choose. Deleting your account removes the live account, its uploaded media and associated records. If deletion is interrupted, you can retry. Signing out or uninstalling the app does not delete the cloud account. Copies others saved and originals in Photos are outside MiNa's control. Infrastructure logs and backups may persist until the hosting provider's retention cycles end."],
+      ["Questions and updates", "To ask about your information, open Profile and choose Contact us. You can review this policy again from Privacy settings. Material changes will be reflected in the updated policy."]
+    ]
+  },
+  "guidelines": {
+    "title": "Community Guidelines",
+    "sections": [
+      ["Keep rooms calm", "Let others finish speaking, respect the host's room topic and keep your microphone muted when you are listening."],
+      ["Respect privacy", "Ask before recording or sharing anyone else's voice, photos or personal information. Do not pressure someone to move into a private conversation."],
+      ["Protect other listeners", "Harassment, threats, sexual exploitation, hateful behavior, impersonation and spam are prohibited. Report concerning content or profiles. You can also block a listener and manage your blocked list from Profile."]
+    ]
+  }
+}

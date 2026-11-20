@@ -1,0 +1,58 @@
+name: MiNa
+options:
+  deploymentTarget:
+    iOS: '16.0'
+settings:
+  base:
+    SWIFT_VERSION: '5.0'
+    IPHONEOS_DEPLOYMENT_TARGET: '16.0'
+    TARGETED_DEVICE_FAMILY: '1'
+    SUPPORTED_PLATFORMS: iphoneos iphonesimulator
+    SUPPORTS_MACCATALYST: NO
+    SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
+    SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD: NO
+    PRODUCT_BUNDLE_IDENTIFIER: com.mina.bedtime
+    MARKETING_VERSION: '1.0.0'
+    CURRENT_PROJECT_VERSION: '1'
+    CLANG_CXX_LANGUAGE_STANDARD: c++20
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+    OTHER_LDFLAGS: $(inherited) -ObjC
+targets:
+  MiNa:
+    type: application
+    platform: iOS
+    sources:
+      - path: MiNa
+        excludes: [Info.plist]
+    settings:
+      base:
+        INFOPLIST_FILE: MiNa/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        TARGETED_DEVICE_FAMILY: '1'
+        SUPPORTS_MACCATALYST: NO
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
+        SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD: NO
+    postCompileScripts:
+      - name: Embed bedtime pages
+        script: |
+          set -eu
+          . "$SRCROOT/.xcode.env"
+          cd "$SRCROOT/.."
+          "$NODE_BINARY" scripts/package-web.mjs "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/MiNaPages.zip"
+        basedOnDependencyAnalysis: false
+      - name: Bundle React Native host
+        script: |
+          set -eu
+          export FORCE_BUNDLING=1
+          "$SRCROOT/../node_modules/react-native/scripts/xcode/with-environment.sh" "$SRCROOT/../node_modules/react-native/scripts/react-native-xcode.sh"
+        basedOnDependencyAnalysis: false
+schemes:
+  MiNa:
+    build:
+      targets:
+        MiNa: all
+    run:
+      config: Debug
+    archive:
+      config: Release
