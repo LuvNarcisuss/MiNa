@@ -11,7 +11,7 @@ from xml.sax.saxutils import escape
 root = Path(__file__).resolve().parents[1]
 output = root / 'docs/policies'
 output.mkdir(parents=True, exist_ok=True)
-policies = json.loads((root/'web/src/policies.json').read_text())
+policies = json.loads((root/'ios/MiNa/policies.json').read_text())
 for key in ('terms', 'privacy'):
     policy = policies[key]
     doc = SimpleDocTemplate(str(output/(key+'.pdf')), pagesize=A4, title=policy['title'],

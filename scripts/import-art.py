@@ -10,7 +10,7 @@ from PIL import Image
 root = Path(__file__).resolve().parents[1]
 sources = json.loads(Path(__file__).with_name("design-sources.json").read_text())
 designs = next(path.parent for path in root.glob("*/*_slices.zip"))
-destination = root / "web/public/art"
+destination = root / "ios/MiNa/Artwork"
 for group, archive in sources.items():
     directory = destination / group
     directory.mkdir(parents=True, exist_ok=True)

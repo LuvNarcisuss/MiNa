@@ -7,33 +7,64 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		E03A1E6273C67AC723941B11 /* policies.json in Resources */ = {isa = PBXBuildFile; fileRef = AA12C5CC8B13DCDCD609831D /* policies.json */; };
+		B5221DB183956BB69B481439 /* VoicePeer.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0D2C6EF97E2832A52EA001 /* VoicePeer.swift */; };
+		2C66B6E200E315861527007D /* VoiceCall.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0225C7CAACFDCE07BABDD1BA /* VoiceCall.swift */; };
+		AAE03447D76481070C389350 /* RoomsStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0513A04463DDEEC5C23AD018 /* RoomsStage.swift */; };
+		CC753A8FB52988C2C0EB3B02 /* RoomsSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBFDA90E59FBB77DB5BD83C3 /* RoomsSession.swift */; };
+		E8BB9275CF9D280A0D454AFB /* RoomsLive.swift in Sources */ = {isa = PBXBuildFile; fileRef = 732729F168D81CBBA279E1F3 /* RoomsLive.swift */; };
+		07A9E057BBC1B4D30A9DD091 /* RoomsGifts.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE9D52ECB7E045E8A44AE634 /* RoomsGifts.swift */; };
+		E45F86083E7EEC6E5C4BEEAC /* Rooms.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70958D58F7F469C699AA646C /* Rooms.swift */; };
+		5EE0113CBF2BC820EA33FF55 /* ProfileScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 713648C3D78F94A168943074 /* ProfileScreen.swift */; };
+		F88EA6F2E4EBA62D396A057D /* MiNaRoot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97DA47A0B9CC1BAFBB1F3D64 /* MiNaRoot.swift */; };
+		FC1BBB123923FC2F40C3FE4B /* MiNaAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5671C53F172EC40CF6C3FEC2 /* MiNaAPI.swift */; };
+		AC53D7D9239FBDA7D413A624 /* Messages.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CCDD6CDDD2B1CAB201C779C /* Messages.swift */; };
+		CA786547D36266521FCC2858 /* EconomyScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8A12EBB70FAEF6B443C4D65 /* EconomyScreen.swift */; };
+		BF1FC0DDA316B6BF99D1ED3B /* CompanionScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8C055548A4207B3E3A3E490 /* CompanionScreen.swift */; };
+		F617D1E553BCB108AD118AB8 /* CommunityScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12EA8853DD82A9C8C909CED5 /* CommunityScreen.swift */; };
+		72384FB7DBF09E17695A91D4 /* CommunityMedia.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0225FE17DF8FF49B1E5E981 /* CommunityMedia.swift */; };
+		D919B963D12037CEEC673D29 /* CommunityComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63B84050CBA7206F1297506E /* CommunityComposer.swift */; };
+		1E507BED594D1D9B12927626 /* Artwork in Resources */ = {isa = PBXBuildFile; fileRef = 7A5441D80B9B46B3CE98ABB9 /* Artwork */; };
+		3123FC78331909498B8C0363 /* AccountScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 085800FE1B8F4BF092ACBC08 /* AccountScreen.swift */; };
+		FFF77BFCE6809265646E9632 /* AccountLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7716DFF29765C6819AC481F4 /* AccountLibrary.swift */; };
+		8A4CCE8B938555F28FF1F0BC /* WebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = B44E2AE76DD745D3726B838D /* WebRTC */; };
 		2FA87643943C8B65F29E54DA /* Companion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43154AB36D82FEC9004514C3 /* Companion.swift */; };
-		53048DD6A1F022D68565D19E /* Bridge.m in Sources */ = {isa = PBXBuildFile; fileRef = 368E616D72008175A76B4DE7 /* Bridge.m */; };
 		8C63BFAA50053D82F563F45B /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11036212099E5BF7B06D4B0B /* AppDelegate.swift */; };
-		92D3388F0EBA972FE84A3B68 /* MiNaNative.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0135934D43F1DA9DE5F068A /* MiNaNative.swift */; };
 		A65968899B82841CA405C2D2 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 9373E7253C83304531946C86 /* PrivacyInfo.xcprivacy */; };
 		B2736EEC33B18E949B30E951 /* DeviceMedia.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB174EEC3574303B3F451073 /* DeviceMedia.swift */; };
 		BB13DD0D2631CBE5DD11BE64 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B442D4D796E6845A532B84A9 /* Assets.xcassets */; };
 		BCA19C8363938A31D0F0E5C0 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 9009DE587BF3629F00F7FD76 /* LaunchScreen.storyboard */; };
 		E05A780649F916AA1021AC41 /* SessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D41B358FDE8EA0C4A27B4D9 /* SessionStore.swift */; };
-		F7A048073B64BA1D4F5C9024 /* libPods-MiNa.a in Frameworks */ = {isa = PBXBuildFile; fileRef = A89EB458EA9260BF09979CFB /* libPods-MiNa.a */; };
-		FA02CDC2EBB0491EB90D9516 /* LocalPages.swift in Sources */ = {isa = PBXBuildFile; fileRef = 333553E25E23735DC1180ED9 /* LocalPages.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		AA12C5CC8B13DCDCD609831D /* policies.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = policies.json; sourceTree = "<group>"; };
+		BB0D2C6EF97E2832A52EA001 /* VoicePeer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoicePeer.swift; sourceTree = "<group>"; };
+		0225C7CAACFDCE07BABDD1BA /* VoiceCall.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceCall.swift; sourceTree = "<group>"; };
+		0513A04463DDEEC5C23AD018 /* RoomsStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomsStage.swift; sourceTree = "<group>"; };
+		FBFDA90E59FBB77DB5BD83C3 /* RoomsSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomsSession.swift; sourceTree = "<group>"; };
+		732729F168D81CBBA279E1F3 /* RoomsLive.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomsLive.swift; sourceTree = "<group>"; };
+		EE9D52ECB7E045E8A44AE634 /* RoomsGifts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomsGifts.swift; sourceTree = "<group>"; };
+		70958D58F7F469C699AA646C /* Rooms.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Rooms.swift; sourceTree = "<group>"; };
+		713648C3D78F94A168943074 /* ProfileScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileScreen.swift; sourceTree = "<group>"; };
+		97DA47A0B9CC1BAFBB1F3D64 /* MiNaRoot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiNaRoot.swift; sourceTree = "<group>"; };
+		5671C53F172EC40CF6C3FEC2 /* MiNaAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiNaAPI.swift; sourceTree = "<group>"; };
+		6CCDD6CDDD2B1CAB201C779C /* Messages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Messages.swift; sourceTree = "<group>"; };
+		A8A12EBB70FAEF6B443C4D65 /* EconomyScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EconomyScreen.swift; sourceTree = "<group>"; };
+		A8C055548A4207B3E3A3E490 /* CompanionScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionScreen.swift; sourceTree = "<group>"; };
+		12EA8853DD82A9C8C909CED5 /* CommunityScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommunityScreen.swift; sourceTree = "<group>"; };
+		A0225FE17DF8FF49B1E5E981 /* CommunityMedia.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommunityMedia.swift; sourceTree = "<group>"; };
+		63B84050CBA7206F1297506E /* CommunityComposer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommunityComposer.swift; sourceTree = "<group>"; };
+		7A5441D80B9B46B3CE98ABB9 /* Artwork */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Artwork; sourceTree = "<group>"; };
+		085800FE1B8F4BF092ACBC08 /* AccountScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountScreen.swift; sourceTree = "<group>"; };
+		7716DFF29765C6819AC481F4 /* AccountLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountLibrary.swift; sourceTree = "<group>"; };
 		11036212099E5BF7B06D4B0B /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
-		333553E25E23735DC1180ED9 /* LocalPages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalPages.swift; sourceTree = "<group>"; };
-		368E616D72008175A76B4DE7 /* Bridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = Bridge.m; sourceTree = "<group>"; };
 		43154AB36D82FEC9004514C3 /* Companion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Companion.swift; sourceTree = "<group>"; };
 		4D41B358FDE8EA0C4A27B4D9 /* SessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionStore.swift; sourceTree = "<group>"; };
-		60D9201DF0596296C969993C /* Pods-MiNa.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-MiNa.release.xcconfig"; path = "Target Support Files/Pods-MiNa/Pods-MiNa.release.xcconfig"; sourceTree = "<group>"; };
 		9009DE587BF3629F00F7FD76 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
 		9373E7253C83304531946C86 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
-		A89EB458EA9260BF09979CFB /* libPods-MiNa.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-MiNa.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		B442D4D796E6845A532B84A9 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		CB174EEC3574303B3F451073 /* DeviceMedia.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceMedia.swift; sourceTree = "<group>"; };
-		D0135934D43F1DA9DE5F068A /* MiNaNative.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiNaNative.swift; sourceTree = "<group>"; };
-		D8D53D28DE36359C7703CA93 /* Pods-MiNa.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-MiNa.debug.xcconfig"; path = "Target Support Files/Pods-MiNa/Pods-MiNa.debug.xcconfig"; sourceTree = "<group>"; };
 		DDAF72F3E994EB44A80473EA /* MiNa.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = MiNa.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -42,23 +73,13 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				F7A048073B64BA1D4F5C9024 /* libPods-MiNa.a in Frameworks */,
+				8A4CCE8B938555F28FF1F0BC /* WebRTC in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		5AEE194E71251FF796B0CFD7 /* Pods */ = {
-			isa = PBXGroup;
-			children = (
-				D8D53D28DE36359C7703CA93 /* Pods-MiNa.debug.xcconfig */,
-				60D9201DF0596296C969993C /* Pods-MiNa.release.xcconfig */,
-			);
-			name = Pods;
-			path = Pods;
-			sourceTree = "<group>";
-		};
 		5E93592F700C7875AF8F5497 /* Products */ = {
 			isa = PBXGroup;
 			children = (
@@ -70,14 +91,31 @@
 		7F3DAA089C7C3A975AF4DDE7 /* MiNa */ = {
 			isa = PBXGroup;
 			children = (
+				AA12C5CC8B13DCDCD609831D /* policies.json */,
+				BB0D2C6EF97E2832A52EA001 /* VoicePeer.swift */,
+				0225C7CAACFDCE07BABDD1BA /* VoiceCall.swift */,
+				0513A04463DDEEC5C23AD018 /* RoomsStage.swift */,
+				FBFDA90E59FBB77DB5BD83C3 /* RoomsSession.swift */,
+				732729F168D81CBBA279E1F3 /* RoomsLive.swift */,
+				EE9D52ECB7E045E8A44AE634 /* RoomsGifts.swift */,
+				70958D58F7F469C699AA646C /* Rooms.swift */,
+				713648C3D78F94A168943074 /* ProfileScreen.swift */,
+				97DA47A0B9CC1BAFBB1F3D64 /* MiNaRoot.swift */,
+				5671C53F172EC40CF6C3FEC2 /* MiNaAPI.swift */,
+				6CCDD6CDDD2B1CAB201C779C /* Messages.swift */,
+				A8A12EBB70FAEF6B443C4D65 /* EconomyScreen.swift */,
+				A8C055548A4207B3E3A3E490 /* CompanionScreen.swift */,
+				12EA8853DD82A9C8C909CED5 /* CommunityScreen.swift */,
+				A0225FE17DF8FF49B1E5E981 /* CommunityMedia.swift */,
+				63B84050CBA7206F1297506E /* CommunityComposer.swift */,
+				7A5441D80B9B46B3CE98ABB9 /* Artwork */,
+				085800FE1B8F4BF092ACBC08 /* AccountScreen.swift */,
+				7716DFF29765C6819AC481F4 /* AccountLibrary.swift */,
 				11036212099E5BF7B06D4B0B /* AppDelegate.swift */,
 				B442D4D796E6845A532B84A9 /* Assets.xcassets */,
-				368E616D72008175A76B4DE7 /* Bridge.m */,
 				43154AB36D82FEC9004514C3 /* Companion.swift */,
 				CB174EEC3574303B3F451073 /* DeviceMedia.swift */,
 				9009DE587BF3629F00F7FD76 /* LaunchScreen.storyboard */,
-				333553E25E23735DC1180ED9 /* LocalPages.swift */,
-				D0135934D43F1DA9DE5F068A /* MiNaNative.swift */,
 				9373E7253C83304531946C86 /* PrivacyInfo.xcprivacy */,
 				4D41B358FDE8EA0C4A27B4D9 /* SessionStore.swift */,
 			);
@@ -89,17 +127,7 @@
 			children = (
 				7F3DAA089C7C3A975AF4DDE7 /* MiNa */,
 				5E93592F700C7875AF8F5497 /* Products */,
-				5AEE194E71251FF796B0CFD7 /* Pods */,
-				A90CD83DA6E86EE93E5B5FEE /* Frameworks */,
 			);
-			sourceTree = "<group>";
-		};
-		A90CD83DA6E86EE93E5B5FEE /* Frameworks */ = {
-			isa = PBXGroup;
-			children = (
-				A89EB458EA9260BF09979CFB /* libPods-MiNa.a */,
-			);
-			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -109,20 +137,18 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 237755F6F9349C64F9714311 /* Build configuration list for PBXNativeTarget "MiNa" */;
 			buildPhases = (
-				6BB293214DA2431FEC7044E7 /* [CP] Check Pods Manifest.lock */,
 				E3DC61BA5052F23EC1B42ED8 /* Sources */,
-				399B1F26620A4CB6C61C23C1 /* Embed bedtime pages */,
-				670490003560FC89568986B2 /* Bundle React Native host */,
 				C2C1A18AB06407E3401A297C /* Resources */,
 				52D96984D4FDBE8006D07ACA /* Frameworks */,
-				E472C90C9B58B516061B5BFC /* [CP] Embed Pods Frameworks */,
-				F2BED66624B278AA95965CAF /* [CP] Copy Pods Resources */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
 			name = MiNa;
+			packageProductDependencies = (
+				B44E2AE76DD745D3726B838D /* WebRTC */,
+			);
 			productName = MiNa;
 			productReference = DDAF72F3E994EB44A80473EA /* MiNa.app */;
 			productType = "com.apple.product-type.application";
@@ -147,6 +173,9 @@
 			);
 			mainGroup = 894DBDF15A956E5CC4C87578;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				32239D8A27C94C96BB285B23 /* XCRemoteSwiftPackageReference "WebRTC" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 5E93592F700C7875AF8F5497 /* Products */;
 			projectDirPath = "";
@@ -162,6 +191,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				E03A1E6273C67AC723941B11 /* policies.json in Resources */,
+				1E507BED594D1D9B12927626 /* Artwork in Resources */,
 				BB13DD0D2631CBE5DD11BE64 /* Assets.xcassets in Resources */,
 				BCA19C8363938A31D0F0E5C0 /* LaunchScreen.storyboard in Resources */,
 				A65968899B82841CA405C2D2 /* PrivacyInfo.xcprivacy in Resources */,
@@ -170,114 +201,32 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
-/* Begin PBXShellScriptBuildPhase section */
-		399B1F26620A4CB6C61C23C1 /* Embed bedtime pages */ = {
-			isa = PBXShellScriptBuildPhase;
-			alwaysOutOfDate = 1;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-			);
-			name = "Embed bedtime pages";
-			outputFileListPaths = (
-			);
-			outputPaths = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "set -eu\n. \"$SRCROOT/.xcode.env\"\ncd \"$SRCROOT/..\"\n\"$NODE_BINARY\" scripts/package-web.mjs \"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/MiNaPages.zip\"\n";
-		};
-		670490003560FC89568986B2 /* Bundle React Native host */ = {
-			isa = PBXShellScriptBuildPhase;
-			alwaysOutOfDate = 1;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-			);
-			name = "Bundle React Native host";
-			outputFileListPaths = (
-			);
-			outputPaths = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "set -eu\nexport FORCE_BUNDLING=1\n\"$SRCROOT/../node_modules/react-native/scripts/xcode/with-environment.sh\" \"$SRCROOT/../node_modules/react-native/scripts/react-native-xcode.sh\"\n";
-		};
-		6BB293214DA2431FEC7044E7 /* [CP] Check Pods Manifest.lock */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-				"${PODS_PODFILE_DIR_PATH}/Podfile.lock",
-				"${PODS_ROOT}/Manifest.lock",
-			);
-			name = "[CP] Check Pods Manifest.lock";
-			outputFileListPaths = (
-			);
-			outputPaths = (
-				"$(DERIVED_FILE_DIR)/Pods-MiNa-checkManifestLockResult.txt",
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
-			showEnvVarsInLog = 0;
-		};
-		E472C90C9B58B516061B5BFC /* [CP] Embed Pods Frameworks */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-				"${PODS_ROOT}/Target Support Files/Pods-MiNa/Pods-MiNa-frameworks-${CONFIGURATION}-input-files.xcfilelist",
-			);
-			name = "[CP] Embed Pods Frameworks";
-			outputFileListPaths = (
-				"${PODS_ROOT}/Target Support Files/Pods-MiNa/Pods-MiNa-frameworks-${CONFIGURATION}-output-files.xcfilelist",
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-MiNa/Pods-MiNa-frameworks.sh\"\n";
-			showEnvVarsInLog = 0;
-		};
-		F2BED66624B278AA95965CAF /* [CP] Copy Pods Resources */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-				"${PODS_ROOT}/Target Support Files/Pods-MiNa/Pods-MiNa-resources-${CONFIGURATION}-input-files.xcfilelist",
-			);
-			name = "[CP] Copy Pods Resources";
-			outputFileListPaths = (
-				"${PODS_ROOT}/Target Support Files/Pods-MiNa/Pods-MiNa-resources-${CONFIGURATION}-output-files.xcfilelist",
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-MiNa/Pods-MiNa-resources.sh\"\n";
-			showEnvVarsInLog = 0;
-		};
-/* End PBXShellScriptBuildPhase section */
-
 /* Begin PBXSourcesBuildPhase section */
 		E3DC61BA5052F23EC1B42ED8 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B5221DB183956BB69B481439 /* VoicePeer.swift in Sources */,
+				2C66B6E200E315861527007D /* VoiceCall.swift in Sources */,
+				AAE03447D76481070C389350 /* RoomsStage.swift in Sources */,
+				CC753A8FB52988C2C0EB3B02 /* RoomsSession.swift in Sources */,
+				E8BB9275CF9D280A0D454AFB /* RoomsLive.swift in Sources */,
+				07A9E057BBC1B4D30A9DD091 /* RoomsGifts.swift in Sources */,
+				E45F86083E7EEC6E5C4BEEAC /* Rooms.swift in Sources */,
+				5EE0113CBF2BC820EA33FF55 /* ProfileScreen.swift in Sources */,
+				F88EA6F2E4EBA62D396A057D /* MiNaRoot.swift in Sources */,
+				FC1BBB123923FC2F40C3FE4B /* MiNaAPI.swift in Sources */,
+				AC53D7D9239FBDA7D413A624 /* Messages.swift in Sources */,
+				CA786547D36266521FCC2858 /* EconomyScreen.swift in Sources */,
+				BF1FC0DDA316B6BF99D1ED3B /* CompanionScreen.swift in Sources */,
+				F617D1E553BCB108AD118AB8 /* CommunityScreen.swift in Sources */,
+				72384FB7DBF09E17695A91D4 /* CommunityMedia.swift in Sources */,
+				D919B963D12037CEEC673D29 /* CommunityComposer.swift in Sources */,
+				3123FC78331909498B8C0363 /* AccountScreen.swift in Sources */,
+				FFF77BFCE6809265646E9632 /* AccountLibrary.swift in Sources */,
 				8C63BFAA50053D82F563F45B /* AppDelegate.swift in Sources */,
-				53048DD6A1F022D68565D19E /* Bridge.m in Sources */,
 				2FA87643943C8B65F29E54DA /* Companion.swift in Sources */,
 				B2736EEC33B18E949B30E951 /* DeviceMedia.swift in Sources */,
-				FA02CDC2EBB0491EB90D9516 /* LocalPages.swift in Sources */,
-				92D3388F0EBA972FE84A3B68 /* MiNaNative.swift in Sources */,
 				E05A780649F916AA1021AC41 /* SessionStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -291,7 +240,6 @@
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
-				CLANG_CXX_LANGUAGE_STANDARD = "c++20";
 				CLANG_CXX_LIBRARY = "libc++";
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = YES;
@@ -323,7 +271,6 @@
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
@@ -336,22 +283,8 @@
 				MARKETING_VERSION = 1.0.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
-				OTHER_CFLAGS = (
-					"$(inherited)",
-					"-DRCT_REMOVE_LEGACY_ARCH=1",
-				);
-				OTHER_CPLUSPLUSFLAGS = (
-					"$(inherited)",
-					"-DRCT_REMOVE_LEGACY_ARCH=1",
-				);
-				OTHER_LDFLAGS = (
-					"$(inherited)",
-					"-ObjC",
-				);
-				PODFILE_DIR = "$(SRCROOT)";
 				PRODUCT_BUNDLE_IDENTIFIER = com.mina.bedtime;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				REACT_NATIVE_PATH = "${PODS_ROOT}/../../node_modules/react-native";
 				SDKROOT = iphoneos;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
@@ -361,7 +294,6 @@
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
-				USE_HERMES = true;
 			};
 			name = Release;
 		};
@@ -371,7 +303,6 @@
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
-				CLANG_CXX_LANGUAGE_STANDARD = "c++20";
 				CLANG_CXX_LIBRARY = "libc++";
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = YES;
@@ -403,7 +334,6 @@
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -423,22 +353,8 @@
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
-				OTHER_CFLAGS = (
-					"$(inherited)",
-					"-DRCT_REMOVE_LEGACY_ARCH=1",
-				);
-				OTHER_CPLUSPLUSFLAGS = (
-					"$(inherited)",
-					"-DRCT_REMOVE_LEGACY_ARCH=1",
-				);
-				OTHER_LDFLAGS = (
-					"$(inherited)",
-					"-ObjC",
-				);
-				PODFILE_DIR = "$(SRCROOT)";
 				PRODUCT_BUNDLE_IDENTIFIER = com.mina.bedtime;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				REACT_NATIVE_PATH = "${PODS_ROOT}/../../node_modules/react-native";
 				SDKROOT = iphoneos;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
@@ -448,13 +364,11 @@
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
-				USE_HERMES = true;
 			};
 			name = Debug;
 		};
 		4C2F2BEC16DA2A304872C7DE /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 60D9201DF0596296C969993C /* Pods-MiNa.release.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
@@ -474,7 +388,6 @@
 		};
 		DF9836D97F2541928487309A /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = D8D53D28DE36359C7703CA93 /* Pods-MiNa.debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
@@ -514,6 +427,25 @@
 			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		32239D8A27C94C96BB285B23 /* XCRemoteSwiftPackageReference "WebRTC" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/stasel/WebRTC.git";
+			requirement = {
+				kind = exactVersion;
+				version = 137.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		B44E2AE76DD745D3726B838D /* WebRTC */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 32239D8A27C94C96BB285B23 /* XCRemoteSwiftPackageReference "WebRTC" */;
+			productName = WebRTC;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 011B033EB99B1A97692AB5F3 /* Project object */;
 }

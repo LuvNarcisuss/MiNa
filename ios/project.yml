@@ -14,16 +14,22 @@ settings:
     PRODUCT_BUNDLE_IDENTIFIER: com.mina.bedtime
     MARKETING_VERSION: '1.0.0'
     CURRENT_PROJECT_VERSION: '1'
-    CLANG_CXX_LANGUAGE_STANDARD: c++20
-    ENABLE_USER_SCRIPT_SANDBOXING: NO
-    OTHER_LDFLAGS: $(inherited) -ObjC
+packages:
+  WebRTC:
+    url: https://github.com/stasel/WebRTC.git
+    exactVersion: 137.0.0
 targets:
   MiNa:
     type: application
     platform: iOS
+    dependencies:
+      - package: WebRTC
     sources:
       - path: MiNa
-        excludes: [Info.plist]
+        excludes: [Info.plist, Artwork]
+      - path: MiNa/Artwork
+        type: folder
+        buildPhase: resources
     settings:
       base:
         INFOPLIST_FILE: MiNa/Info.plist
@@ -33,20 +39,6 @@ targets:
         SUPPORTS_MACCATALYST: NO
         SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
         SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD: NO
-    postCompileScripts:
-      - name: Embed bedtime pages
-        script: |
-          set -eu
-          . "$SRCROOT/.xcode.env"
-          cd "$SRCROOT/.."
-          "$NODE_BINARY" scripts/package-web.mjs "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/MiNaPages.zip"
-        basedOnDependencyAnalysis: false
-      - name: Bundle React Native host
-        script: |
-          set -eu
-          export FORCE_BUNDLING=1
-          "$SRCROOT/../node_modules/react-native/scripts/xcode/with-environment.sh" "$SRCROOT/../node_modules/react-native/scripts/react-native-xcode.sh"
-        basedOnDependencyAnalysis: false
 schemes:
   MiNa:
     build:

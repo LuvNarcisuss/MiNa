@@ -19,10 +19,9 @@ final class DeviceMedia: NSObject, PHPickerViewControllerDelegate, UIDocumentPic
     private var pendingPermission = false
     private var kind = ""
     private var pickerReply: Completion?
-    private var mediaDirectory: URL { LocalPages.library.appendingPathComponent("Media", isDirectory: true) }
-    private var exportDirectory: URL { LocalPages.pages.appendingPathComponent("private-media", isDirectory: true) }
-    private var recentTake: URL { LocalPages.library.appendingPathComponent("last-recording.txt") }
-    private var pendingTake: URL { LocalPages.library.appendingPathComponent("pending-recording.txt") }
+    private var mediaDirectory: URL { AccountLibrary.library.appendingPathComponent("Media", isDirectory: true) }
+    private var recentTake: URL { AccountLibrary.library.appendingPathComponent("last-recording.txt") }
+    private var pendingTake: URL { AccountLibrary.library.appendingPathComponent("pending-recording.txt") }
 
     override init() {
         super.init()
@@ -55,66 +54,36 @@ final class DeviceMedia: NSObject, PHPickerViewControllerDelegate, UIDocumentPic
         return url
     }
 
-    private func export(_ url: URL, id: String) throws -> URL {
-        let targetDirectory = exportDirectory.appendingPathComponent(id, isDirectory: true)
-        try fs.createDirectory(at: targetDirectory, withIntermediateDirectories: true)
-        let target = targetDirectory.appendingPathComponent(url.lastPathComponent)
-        if !fs.fileExists(atPath: target.path) { try fs.linkItem(at: url, to: target) }
-        return target
-    }
-
     func resolve(_ id: String) throws -> Payload {
         let file = try asset(id)
-        var value: Payload = ["id": id, "url": try export(file, id: id).absoluteString]
+        var value: Payload = ["id": id, "url": file.absoluteString]
         let type = UTType(filenameExtension: file.pathExtension)
         if type?.conforms(to: .audiovisualContent) == true {
             let seconds = AVURLAsset(url: file).duration.seconds
             if seconds.isFinite { value["duration"] = seconds }
         }
         let cover = file.deletingLastPathComponent().appendingPathComponent("cover.jpg")
-        if fs.fileExists(atPath: cover.path) { value["cover"] = try export(cover, id: id).absoluteString }
+        if fs.fileExists(atPath: cover.path) { value["cover"] = cover.absoluteString }
         return value
-    }
-
-    func bytes(_ params: Payload) throws -> Payload {
-        let url = try asset(params["id"] as? String ?? "")
-        let handle = try FileHandle(forReadingFrom: url)
-        defer { try? handle.close() }
-        let size = Int(try handle.seekToEnd())
-        let offset = params["offset"] as? Int ?? 0
-        let length = params["length"] as? Int
-        guard offset >= 0, offset <= size else { throw MiNaIssue("The requested media position is invalid.") }
-        if let length {
-            guard (1...524288).contains(length) else { throw MiNaIssue("Choose a smaller media segment.") }
-        } else if size - offset > 8 * 1024 * 1024 {
-            throw MiNaIssue("Read this media in smaller segments.")
-        }
-        try handle.seek(toOffset: UInt64(offset))
-        let data = try handle.read(upToCount: min(length ?? (size - offset), size - offset)) ?? Data()
-        let type = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
-        return ["base64": data.base64EncodedString(), "mimeType": type, "total": size, "nextOffset": offset + data.count]
     }
 
     func remove(_ id: String) throws {
         let url = try directory(id)
         if playerID == id { stopPlayback() }
         if recorder?.url.deletingLastPathComponent() == url { throw MiNaIssue("Finish this recording before removing it.") }
-        let view = exportDirectory.appendingPathComponent(id)
-        if fs.fileExists(atPath: view.path) { try fs.removeItem(at: view) }
         if fs.fileExists(atPath: url.path) { try fs.removeItem(at: url) }
     }
 
     func prepareAccountChange() throws {
         guard pickerReply == nil, !pendingPermission else { throw MiNaIssue("Finish the media selection first.") }
         background()
-        if fs.fileExists(atPath: exportDirectory.path) { try fs.removeItem(at: exportDirectory) }
     }
 
     func clear() throws {
         guard pickerReply == nil, !pendingPermission else { throw MiNaIssue("Finish the media selection first.") }
         background()
-        for url in [exportDirectory, LocalPages.library] where fs.fileExists(atPath: url.path) {
-            try fs.removeItem(at: url)
+        if fs.fileExists(atPath: AccountLibrary.library.path) {
+            try fs.removeItem(at: AccountLibrary.library)
         }
     }
 
@@ -221,7 +190,6 @@ final class DeviceMedia: NSObject, PHPickerViewControllerDelegate, UIDocumentPic
             return try resolve(id)
         } catch {
             try? fs.removeItem(at: folder)
-            try? fs.removeItem(at: exportDirectory.appendingPathComponent(id))
             throw error
         }
     }

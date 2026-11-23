@@ -1,12 +1,7 @@
 .DS_Store
-node_modules/
 build/
-ios/Pods/
-ios/.xcode.env.local
 xcuserdata/
 *.xcuserstate
-!ios/MiNa.xcworkspace/
-!ios/MiNa.xcworkspace/contents.xcworkspacedata
 !ios/MiNa.xcodeproj/project.xcworkspace/
 !ios/MiNa.xcodeproj/project.xcworkspace/contents.xcworkspacedata
 !ios/MiNa.xcodeproj/xcshareddata/

@@ -2,7 +2,7 @@
 
 ## App and cloud
 
-- App, scheme and target are named MiNa. The iPhone-only host uses React Native 0.88.1 and iOS 16.0 or newer. The local bundle identifier is com.mina.bedtime. Release signing and App Store products require owner-provided identifiers.
+- MiNa uses SwiftUI screens, a native navigation stack and bundled artwork on iPhones running iOS 16.0 or newer. The app, scheme and target are named MiNa. The bundle identifier is com.mina.bedtime. The native URLSession client uses the existing service and Keychain credentials. The first native entry requires Continue, including on upgrade, to respect the previous installation's sign-out state. Device state and media retain their original owner directories. Release signing and App Store products require owner-provided identifiers.
 - The Gmail-linked organization hosts MiNa in Tokyo. Project reference is nojpfyqctfwdshqnzudp. The owner explicitly approved permanent removal of Toli. The dashboard acknowledged deletion, and the organization listing subsequently contained MiNa and Sese.
 - Anonymous Supabase Auth is enabled. Sign-in uses the public app key, creates or restores a genuine user session and bootstraps an owned profile. Session credentials use Keychain. “Sign out” locks access in this installation and “Continue” reopens its device identity. Cross-device account recovery is pending.
 - The deployed database covers profiles, visibility, follows, blocks, reports, posts, dreams, private media, comments, reactions, messages, calling, room presence, seats, audio signaling, gifts, wallet records and support. Each local migration filename matches its remote migration version. The app uses signed media URLs and user-scoped requests.
@@ -11,7 +11,11 @@
 - Room audio and one-to-one calls use WebRTC and authenticated, participant-scoped signaling. A foreground receiver can answer or decline. Production TURN configuration, background incoming-call notifications and physical-device audio acceptance remain outstanding.
 - Twenty gifts and VIP0 through VIP12 are available in the interface. Gift delivery, inventory, spending and check-in use server-side transactions. Coin packages remain unavailable while the App Store catalog and verified purchase delivery are unconfigured. The application does not charge to create rooms, request music or start the on-device companion.
 
-## Current verification
+## Native migration verification
+
+The native target uses SwiftUI, Foundation Models where available, AVFoundation and WebRTC. Artwork, soundscapes and policy text are packaged as native resources. All 22 Swift files passed syntax parsing and are included in the application target. All 508 migrated artwork and audio files match the previous resource bytes. The policy text also matches. Xcode resolved the pinned WebRTC 137.0.0 package. The project contains no page-packaging build phase. On November 23, 2026, Xcode 26.3 built the current Debug scheme from `ios/MiNa.xcodeproj` for the newly created MiNa QA simulator (iPhone 17 Pro, iOS 26.3, UDID `DBFA7AD1-FB00-4FB8-8287-D8E72FE9594E`). The first compilation identified the WebRTC transceiver setter's explicit error argument. After correcting that call, the build succeeded with AVFoundation deprecation warnings. The resulting app was installed and launched on that same device. A screenshot confirmed the native welcome screen, consent switch and Continue button. The screenshot is in `build/MiNaQA/MiNa-QA-launch.png`. Upgrade, sign-in, payments and two-device audio were outside this launch check.
+
+## Historical verification with the previous host
 
 The Release build succeeded for an iPhone 17 Pro simulator on iOS 26.0 using Xcode 26.0.1. The installed app reports UIDeviceFamily 1. The bundled RN host and local H5 archive were present. Native extraction completed on launch and all 511 extracted resources matched the SHA-256 manifest.
 
@@ -19,7 +23,7 @@ A database transaction exercised real authenticated-role and RPC behavior using 
 
 The acceptance record in the acceptance directory contains screenshots observed on the selected simulator. Apple sandbox and production payment, real acoustic capture and playback across two phones, carrier-network media traversal and on-device language-model output still require suitable devices and configuration.
 
-## Simulator journeys and build output
+## Historical simulator journeys and build output
 
 The initial acceptance run exercised consent, anonymous sign-in, Rooms, the central AI Companion destination, all three topic dialogs, Dream Square and Profile. A second journey covered the Feed video composer, disabled empty submission, notification categories, unavailable coin packages, the 20-item store, local soundscape playback, pause and exit. Both XCTest journeys passed.
 
