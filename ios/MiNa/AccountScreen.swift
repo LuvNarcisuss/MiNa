@@ -14,6 +14,10 @@ struct AccountScreen: View {
     }()
 
     var body: some View {
+        content.preferredColorScheme(.light)
+    }
+
+    @ViewBuilder private var content: some View {
         if route.name.hasPrefix("legal.") {
             let key = String(route.name.dropFirst(6))
             if let policy = Self.policies[key] {
@@ -28,7 +32,7 @@ struct AccountScreen: View {
                             Link("Open PDF", destination: MiNaAPI.origin.appendingPathComponent("functions/v1/policies/\(key).pdf"))
                         }
                     }.padding()
-                }.navigationTitle(policy.title)
+                }.background { AccountBackdrop(group: "privacy") }.navigationTitle(policy.title).navigationBarTitleDisplayMode(.inline)
             } else { Text("This document is unavailable.") }
         } else if route.name == "support" {
             Form {
@@ -38,17 +42,25 @@ struct AccountScreen: View {
                         .disabled(sending || !(5...2000).contains(message.trimmingCharacters(in: .whitespacesAndNewlines).count))
                 }
                 if !notice.isEmpty { Text(notice) }
-            }.navigationTitle("Contact us")
+            }.scrollContentBackground(.hidden).background { AccountBackdrop(group: "privacy") }.navigationTitle("Contact us").navigationBarTitleDisplayMode(.inline)
         } else {
             let removing = route.name == "delete"
-            Form {
-                Section(removing ? "Delete your MiNa account?" : "Leave MiNa on this iPhone?") {
+            VStack {
+                Spacer()
+                VStack(spacing: 16) {
+                    Text(removing ? "Delete your MiNa account?" : "Sign out of MiNa?").font(.title3.bold())
                     Text(removing ? "Your cloud account, uploaded media, messages and associated records will be permanently removed." : "Your account key stays in Keychain. Use Continue on this iPhone to reopen your account.")
-                    Button(removing ? "Permanently delete" : "Sign out", role: .destructive) { Task { await app.leave(delete: removing) } }
+                        .font(.callout).multilineTextAlignment(.center)
+                    Button(role: .destructive) { Task { await app.leave(delete: removing) } } label: {
+                        Text(removing ? "Permanently delete" : "Sign out").font(.headline).foregroundStyle(.black)
+                            .frame(maxWidth: .infinity,minHeight: 46).background(LinearGradient(colors:[.mint,.cyan],startPoint:.leading,endPoint:.trailing),in: Capsule())
+                    }
                     Button("Cancel") { app.back() }
-                }.disabled(app.busy)
-                if !app.accountError.isEmpty { Text(app.accountError) }
-            }.navigationTitle(removing ? "Delete account" : "Sign out")
+                    if !app.accountError.isEmpty { Text(app.accountError).font(.footnote) }
+                }.padding(24).disabled(app.busy).background { NativeArt("spend",1) }
+                    .clipShape(RoundedRectangle(cornerRadius: 20))
+            }.frame(maxWidth: .infinity).background { AccountBackdrop(group: "privacy") }
+                .navigationTitle(removing ? "Delete account" : "Sign out").navigationBarTitleDisplayMode(.inline)
         }
     }
 

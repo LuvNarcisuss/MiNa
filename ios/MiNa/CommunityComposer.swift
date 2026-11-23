@@ -25,15 +25,18 @@ struct CommunityComposer: View {
     private var title: String { isRecorder ? "Recording" : dream ? "Post a dream" : "New post" }
 
     var body: some View {
-        ScrollView {
+        GeometryReader { bounds in
+          ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 if isRecorder { recorderControls } else { editor }
                 if !status.isEmpty { ProgressView(status) }
                 if !message.isEmpty { Text(message).font(.callout).accessibilityLabel(message) }
-            }.padding()
+            }.padding(.horizontal,18).padding(.vertical,6).frame(minHeight: bounds.size.height, alignment: .top)
+          }
         }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(.hidden, for: .navigationBar)
         .onAppear {
             visible = true
             account = app.api.userID
@@ -56,38 +59,52 @@ struct CommunityComposer: View {
     }
 
     @ViewBuilder private var editor: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 14) {
             if dream {
                 caption
-                NativeArt("dreamCompose",3).scaledToFit().frame(maxHeight: 160).frame(maxWidth: .infinity)
-                if let media { preview(media) }
-                Button(candidate != nil || pending != nil ? "Review your take" : media == nil ? "Record a dream" : "Record again") {
-                    perform { try save(draft); app.go("dreams.record") }
-                }.buttonStyle(.bordered)
-            } else {
-                if let media {
-                    preview(media)
-                    Button("Remove video",role: .destructive) { perform {
-                        var next = draft; next.removeValue(forKey: "media"); next["id"] = UUID().uuidString.lowercased()
-                        try save(next); clean(media)
-                    } }
-                } else {
-                    Button { work { try await pick() } } label: {
-                        VStack { NativeArt("compose",3).scaledToFit().frame(height: 96); Text("Choose a video") }.frame(maxWidth: .infinity).padding()
+                VStack(spacing: 14) {
+                    NativeArt("dreamCompose",3).scaledToFit().frame(width:222,height:135).accessibilityHidden(true)
+                    if let media { preview(media) }
+                    Button {
+                        perform { try save(draft); app.go("dreams.record") }
+                    } label: {
+                        Text(candidate != nil || pending != nil ? "Review your take" : media == nil ? "Record a dream" : "Record again")
+                            .font(.subheadline.weight(.semibold)).padding(.horizontal,28).frame(minHeight:44)
+                            .overlay { Capsule().stroke(.teal.opacity(0.55),lineWidth:1) }
                     }
-                }
+                }.padding(18).frame(maxWidth:.infinity).frame(minHeight:290).background(.white,in: RoundedRectangle(cornerRadius:14))
+            } else {
+                ZStack(alignment: .topTrailing) {
+                    if let media {
+                        preview(media)
+                        Button { perform {
+                            var next = draft; next.removeValue(forKey:"media"); next["id"] = UUID().uuidString.lowercased()
+                            try save(next); clean(media)
+                        } } label: { NativeArt("compose",4).scaledToFit().frame(width:22,height:22).frame(width:44,height:44) }.accessibilityLabel("Remove video")
+                    } else {
+                        Button { work { try await pick() } } label: {
+                            VStack(spacing:6) {
+                                NativeArt("compose",3).scaledToFit().frame(width:152,height:112)
+                                Text("Choose a video").font(.subheadline).foregroundStyle(.secondary)
+                            }.frame(maxWidth:.infinity,maxHeight:.infinity)
+                        }
+                    }
+                }.frame(maxWidth:265).frame(height:260).background(.white,in: RoundedRectangle(cornerRadius:14)).frame(maxWidth:.infinity)
                 caption
             }
-            Text("Your published " + (dream ? "dream" : "post") + " will be visible on MiNa.").font(.footnote)
-            Button(dream ? "Publish dream" : "Publish post") { work { try await publish() } }.buttonStyle(.borderedProminent).disabled(media == nil)
-        }.disabled(busy).communityCard()
+            Button { work { try await publish() } } label: {
+                Text(dream ? "Publish dream" : "Publish post").communityPrimary()
+            }.disabled(media == nil).opacity(media == nil ? 0.72 : 1).padding(.horizontal,4).padding(.top,32)
+        }.disabled(busy)
     }
     private var caption: some View {
-        VStack(alignment: .leading) {
-            Text(dream ? "Dream description" : "Tonight’s mood").font(.headline)
+        VStack(alignment: .leading,spacing:8) {
+            if !dream { Text("Tonight’s mood").font(.subheadline.weight(.medium)).foregroundStyle(.secondary) }
             TextField(dream ? "What do you remember from your dream?" : "What would you like to remember?", text: Binding(get: { draft.communityString("text") }, set: { value in
                 perform { var next = draft; next["text"] = String(value.prefix(2000)); try save(next) }
-            }), axis: .vertical).lineLimit(3...8)
+            }), axis: .vertical).font(.body).lineLimit(3...8)
+                .padding(14).frame(maxWidth:.infinity,alignment:.leading).frame(minHeight:dream ? 164 : 214,alignment:.top)
+                .background(.white,in: RoundedRectangle(cornerRadius:14))
         }
     }
     private func preview(_ item: CommunityRow) -> some View {
@@ -95,9 +112,10 @@ struct CommunityComposer: View {
     }
     @ViewBuilder private var recorderControls: some View {
         VStack(spacing: 18) {
-            NativeArt(recording ? "recording" : "recorder",2).scaledToFit().frame(height: 180)
-            Text(communityClock(recording ? seconds : candidate?.communitySeconds("duration") ?? 0)).font(.largeTitle.monospacedDigit())
-            Text("Record up to 60 seconds.")
+            NativeArt(recording ? "recording" : "recorder",2).scaledToFit().frame(width:recording ? 276 : 222,height:250).accessibilityHidden(true).padding(.top,48)
+            Text(communityClock(recording ? seconds : candidate?.communitySeconds("duration") ?? 0)).font(.title2.weight(.medium).monospacedDigit())
+            Text("Record up to 60 seconds.").font(.footnote).foregroundStyle(.secondary)
+            Spacer(minLength:90)
             if !recording, let candidate { preview(candidate) }
             if recoveryNeeded {
                 Text("The recording was interrupted.")
@@ -112,7 +130,7 @@ struct CommunityComposer: View {
                 Button {
                     if recording { perform { try finish() } } else { work { try await start() } }
                 } label: {
-                    VStack { NativeArt(recording ? "recording" : "recorder",3).scaledToFit().frame(height: 58); Text(recording ? "Stop recording" : candidate == nil ? "Tap to record" : "Record again") }
+                    VStack { NativeArt(recording ? "recording" : "recorder",3).scaledToFit().frame(height: 84); Text(recording ? "Stop recording" : candidate == nil ? "Tap to record" : "Record again") }
                 }
             }
             if let candidate {
@@ -120,9 +138,9 @@ struct CommunityComposer: View {
                     let previous = media
                     var next = draft; next["media"] = candidate; next.removeValue(forKey: "candidate"); next["id"] = UUID().uuidString.lowercased()
                     try save(next); clean(previous); app.back()
-                } }.buttonStyle(.borderedProminent).disabled(pending != nil || recording)
+                } }.buttonStyle(CommunitySaveStyle()).disabled(pending != nil || recording)
             }
-        }.frame(maxWidth: .infinity).communityCard().disabled(busy)
+        }.frame(maxWidth: .infinity).padding(.bottom,24).disabled(busy)
     }
     private func perform(_ action: () throws -> Void) {
         do { try action() } catch { message = error.localizedDescription }
@@ -237,4 +255,8 @@ struct CommunityComposer: View {
             } else { recording = false; recoveryNeeded = true }
         } catch { message = error.localizedDescription; recoveryNeeded = true; recording = false }
     }
+}
+
+private struct CommunitySaveStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View { configuration.label.communityPrimary().opacity(configuration.isPressed ? 0.75 : 1) }
 }

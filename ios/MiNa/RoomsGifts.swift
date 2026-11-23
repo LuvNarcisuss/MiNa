@@ -11,7 +11,7 @@ struct RoomInvitations: View {
     @State private var operations: [String:String] = [:]
     @State private var retry = 0
     var body: some View {
-        List {
+        RoomPanelList {
             Text("Invitations appear in your friend’s conversation. Room visibility still applies.")
             ForEach(Array(friends.enumerated()),id: \.offset) { _,person in
                 let uid = person.roomText("id")
@@ -26,7 +26,7 @@ struct RoomInvitations: View {
                     } catch { self.error = error.localizedDescription } }
                 }.disabled(busy || sent.contains(uid)) }
             }
-            if friends.isEmpty && error.isEmpty { Text(loaded ? "No friends to invite." : "Finding friends…") }
+            if friends.isEmpty && error.isEmpty { RoomEmptyPanel(title: loaded ? "No friends to invite" : "Finding friends…",detail: "Friends are people who follow each other.") }
             if !error.isEmpty { Text(error); Button("Retry") { retry += 1 } }
         }.task(id: retry) {
             do {
@@ -42,12 +42,47 @@ struct RoomInvitations: View {
     }
 }
 
+struct RoomGiftCatalog: View {
+    let choices: [Int]
+    let selected: Int
+    let price: (Int) -> String?
+    let select: (Int) -> Void
+    @State private var page = 0
+    var body: some View {
+        let pages = (choices.count + 7) / 8
+        VStack(spacing: 3) {
+            TabView(selection: $page) {
+                ForEach(0..<pages,id: \.self) { number in
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible()),count: 4)) {
+                        ForEach(Array(choices.dropFirst(number * 8).prefix(8)),id: \.self) { i in
+                            Button { select(i) } label: {
+                                VStack(spacing: 2) {
+                                    NativeArt("store",i+3).scaledToFit().frame(height: 42).padding(3)
+                                        .frame(maxWidth: .infinity).background(.white.opacity(0.8),in: RoundedRectangle(cornerRadius: 9))
+                                        .overlay { if selected == i { RoundedRectangle(cornerRadius: 9).stroke(.teal,lineWidth: 2) } }
+                                    Text(RoomGifts.names[i]).font(.caption2).lineLimit(1)
+                                    if let label = price(i) { Text(label).font(.caption2).foregroundStyle(.secondary).lineLimit(1) }
+                                }
+                            }.buttonStyle(.plain).accessibilityAddTraits(selected == i ? .isSelected : [])
+                        }
+                    }.frame(maxHeight: .infinity,alignment: .top).tag(number)
+                }
+            }.tabViewStyle(.page(indexDisplayMode: .never)).frame(height: 168)
+            if pages > 1 { HStack(spacing: 5) { ForEach(0..<pages,id: \.self) { i in
+                Circle().fill(page == i ? Color.teal : .gray.opacity(0.36)).frame(width: 6,height: 6)
+            } }.frame(maxWidth: .infinity).accessibilityHidden(true) }
+        }.onChange(of: choices) { _ in page = 0 }
+    }
+}
+
 struct RoomGifts: View {
     static let names = ["Sleep Mask","Cloud Kitten","Triple Six","Stardust Jar","Wishing Star","Moon Headphones","Rain Cloud","Dream Pillow","Dreamcatcher","Bunny Slippers","Sleeping Moon","Soft Slumber","Night Orbit","Star Friend","Sleepy Bear","Moonlight Bed","Heartbeat","Heart Headphones","Star Wand","Moon Lantern"]
     @EnvironmentObject var app: MiNaAppModel
-    @Environment(\.dismiss) var dismiss
+
     let id: String
     @ObservedObject var session: NativeRoomSession
+    let initialRecipient: String?
+    let close: () -> Void
     let openWallet: () throws -> Void
     @State private var index = 0
     @State private var recipient = ""
@@ -72,11 +107,11 @@ struct RoomGifts: View {
     }
     func change<T>(_ binding: Binding<T>,_ value: T) { binding.wrappedValue = value; operation = ""; confirm = false; error = "" }
     var body: some View {
-        Form {
+        RoomPanelList {
             if sent {
                 Text("Gift sent").font(.headline)
                 Text("\(quantity) × " + Self.names[index] + " sent to " + session.name(recipient) + ".")
-                Button("Done") { dismiss() }
+                Button("Done") { close() }.buttonStyle(RoomCapsuleStyle())
             } else {
                 if !confirm {
                     Picker("Gift source",selection: Binding(get: { backpack },set: { value in
@@ -85,27 +120,24 @@ struct RoomGifts: View {
                     })) { Text("Catalog").tag(false); Text("Backpack").tag(true) }.pickerStyle(.segmented)
                     let choices = Self.names.indices.filter { !backpack || inventory[$0,default: 0] > 0 }
                     if choices.isEmpty { Text("Your backpack is empty.") }
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 3)) {
-                        ForEach(choices,id: \.self) { i in
-                            Button { change($index,i); quantity = 1 } label: {
-                                VStack { NativeArt("store",i+3).scaledToFit().frame(height: 50); Text(Self.names[i]).font(.caption)
-                                    Text(backpack ? "\(inventory[i,default: 0]) owned" : prices[i].map { $0 == 0 ? "Free" : "\($0) coins" } ?? "Unavailable").font(.caption2)
-                                }.padding(4).frame(maxWidth: .infinity).background(index == i ? Color.teal.opacity(0.2) : .clear,in: RoundedRectangle(cornerRadius: 10))
-                            }.buttonStyle(.plain).accessibilityAddTraits(index == i ? .isSelected : [])
-                        }
-                    }
+                    RoomGiftCatalog(choices: choices,selected: index,price: { i in
+                        backpack ? "\(inventory[i,default: 0]) owned" : prices[i].map { $0 == 0 ? "Free" : "\($0) coins" } ?? "Unavailable"
+                    },select: { i in change($index,i); quantity = 1 })
                     Picker("Recipient",selection: Binding(get: { recipient },set: { change($recipient,$0) })) {
                         Text(others.isEmpty ? "No other participants" : "Select a recipient").tag("")
                         ForEach(others,id: \.self) { Text(session.name($0)).tag($0) }
                     }
                     Stepper("Quantity: \(quantity)",value: Binding(get: { quantity },set: { change($quantity,$0) }),in: 1...max(1,limit))
-                } else { Text("\(quantity) × " + Self.names[index]); Text("Recipient: " + session.name(recipient)) }
+                } else {
+                    VStack(spacing: 10) { NativeArt("store",index+3).scaledToFit().frame(height: 55); Text("Confirm gift").font(.title3.bold()); Text("\(quantity) × " + Self.names[index]); Text("Recipient: " + session.name(recipient)) }.frame(maxWidth: .infinity).padding().background { NativeArt("spend",5) }
+                }
                 LabeledContent("Total",value: total.map { "\($0) coins" } ?? "Unavailable")
                 LabeledContent("Balance",value: balance.map { "\($0) coins" } ?? "Unavailable")
                 if let total,let balance,total > balance {
+                    Text("Insufficient balance").font(.headline)
                     Button("Open wallet") { do { try retain(operation); try openWallet() } catch { self.error = error.localizedDescription } }
                 } else {
-                    Button(confirm ? "Confirm and send" : "Review gift") { if confirm { send() } else { confirm = true } }.disabled(!valid || busy)
+                    Button(confirm ? "Confirm and send" : "Review gift") { if confirm { send() } else { confirm = true } }.buttonStyle(RoomCapsuleStyle()).disabled(!valid || busy)
                 }
                 if confirm { Button("Change selection") { confirm = false }.disabled(busy) }
             }
@@ -116,6 +148,7 @@ struct RoomGifts: View {
                 quantity = min(max(1,state["quantity"] as? Int ?? 1),99); recipient = state.roomText("recipient")
                 backpack = state.roomFlag("backpack"); operation = state.roomText("operation")
             }
+            if retry == 0, let initialRecipient, operation.isEmpty { recipient = initialRecipient }
             do {
                 let me = app.api.userID
                 async let wallets = app.api.rows("wallets?select=balance&owner_id=eq." + me)

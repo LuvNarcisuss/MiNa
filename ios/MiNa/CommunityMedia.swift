@@ -49,6 +49,7 @@ struct CommunityMedia: View {
     let duration: Double
     let voice: Bool
     let remote: Bool
+    var videoHeight: CGFloat = 220
     @StateObject private var model = CommunityPlayer()
     @State private var attempt = 0
     private let bars = [9,17,13,25,32,14,21,11,19,29,37,16,22,10,26,34,20,14,25,12,18,30,19,10,24,33,21,15,26,13,31,18]
@@ -65,13 +66,13 @@ struct CommunityMedia: View {
                             NativeArt("dreams", model.playing ? 18 : 3).scaledToFit().frame(width: 30,height: 30)
                             HStack(spacing: 2) {
                                 ForEach(bars.indices, id: \.self) { i in
-                                    Capsule().fill(Color.teal.opacity(Double(i) / Double(bars.count) <= model.position / max(1,duration) ? 1 : 0.5)).frame(height: CGFloat(bars[i]))
+                                    Capsule().fill(Color.white.opacity(Double(i) / Double(bars.count) <= model.position / max(1,duration) ? 1 : 0.65)).frame(height: CGFloat(bars[i]))
                                 }
                             }
                             Text(communityClock(model.position > 0.1 ? model.position : duration)).monospacedDigit()
-                        }.padding(8).background(Color.mint.opacity(0.14), in: Capsule())
+                        }.foregroundStyle(.white).padding(.horizontal,14).frame(minHeight:60).background(Color(red:0.52,green:0.61,blue:0.62), in: RoundedRectangle(cornerRadius:12))
                     }.accessibilityLabel(model.playing ? "Pause recording" : "Play recording")
-                } else { VideoPlayer(player: player).frame(height: 220).cornerRadius(14) }
+                } else { VideoPlayer(player: player).frame(height: videoHeight).cornerRadius(14) }
             } else { ProgressView(voice ? "Opening recording…" : "Opening video…") }
         }.task(id: path + String(attempt)) {
             model.close()

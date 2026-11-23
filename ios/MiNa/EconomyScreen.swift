@@ -8,6 +8,8 @@ struct EconomyScreen: View {
     @State private var catalog: [Gift] = []
     @State private var inventory: [Int: Int] = [:]
     @State private var level: [String: Any] = [:]
+    @State private var returnGiftID: Int?
+    @State private var navigateToWallet = false
     @State private var selected: Gift?
     @State private var busy = false
     @State private var notice = ""
@@ -27,30 +29,35 @@ struct EconomyScreen: View {
                 if route.name == "wallet" {
                     HStack {
                         VStack(alignment: .leading) {
-                            Text("My balance")
-                            if let balance { Text(balance.formatted()).font(.largeTitle.bold()) }
+                            Text("My balance").font(.headline)
+                            if let balance { Text(balance.formatted()).font(.largeTitle.bold().monospacedDigit()) }
+                            else if loaded { Text("Balance unavailable").font(.subheadline) }
                             Text("Star coins").font(.caption)
                         }
                         Spacer()
-                        NativeArt("wallet", 3).scaledToFit().frame(width: 76)
-                    }.padding().background(Color.mint.opacity(0.22), in: RoundedRectangle(cornerRadius: 16))
+                        NativeArt("wallet", 3).scaledToFit().frame(width: 105)
+                    }.padding(.vertical, 12)
                     Text("Coin packages").font(.headline)
-                    Text(SKPaymentQueue.canMakePayments() ? "Coin packages are not available yet." : "Purchases are disabled on this iPhone.")
-                    Button("Check again") { Task { await load() } }
-                    Button("My backpack") { app.go("store.bag") }
+                    VStack(alignment: .leading,spacing: 12) {
+                        Text(SKPaymentQueue.canMakePayments() ? "Coin packages are not available yet." : "Purchases are disabled on this iPhone.")
+                            .font(.callout)
+                        Button("Refresh balance") { Task { await load() } }.buttonStyle(.bordered)
+                    }.padding().frame(maxWidth: .infinity,alignment: .leading).background(.white.opacity(0.9),in: RoundedRectangle(cornerRadius: 12))
+                    Button { app.go("store.bag") } label: {
+                        HStack { Text("My backpack"); Spacer(); Image(systemName:"chevron.right").font(.caption) }.padding().contentShape(Rectangle())
+                    }.background(.white,in: RoundedRectangle(cornerRadius: 12))
+
                 } else if route.name == "level" {
                     if let current = level["current_level"] as? Int, let contribution = level["contribution"] as? Int {
-                        Text("Gift contribution").font(.headline)
-                        Text("\(contribution.formatted()) coins").font(.title.bold())
-                        Text("VIP \(current)")
-                        if let next = level["next_threshold"] as? Int { Text("\(next.formatted()) coins for the next level") }
-                        else { Text("Highest level reached") }
-                        let badges = [12,11,10,9,8,7,6,5,4,13,3,2,1]
-                        LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 3)) {
-                            ForEach(badges.indices, id: \.self) { n in
-                                NativeArt("medals", badges[n] + (n <= current ? 0 : 13)).scaledToFit().accessibilityLabel("VIP \(n)")
-                            }
-                        }
+                        VStack(alignment: .leading,spacing: 7) {
+                            Text("Gift contribution").font(.caption)
+                            HStack { NativeArt("level",17).scaledToFit().frame(width:26); Text(contribution.formatted()).font(.title.bold()) }
+                            if let next = level["next_threshold"] as? Int {
+                                ProgressView(value: min(Double(contribution),Double(next)), total: Double(max(1,next))).tint(.white)
+                                Text("VIP \(current) · \(next.formatted()) coins for the next level").font(.footnote)
+                            } else { Text("VIP \(current) · Highest level reached") }
+                        }.padding(16).frame(maxWidth: .infinity,alignment: .leading).background { NativeArt("level",16) }
+                        LevelJourney(current: current)
                     }
                 } else {
                     Picker("Collection", selection: Binding(get: { bag }, set: { value in app.go(value ? "store.bag" : "store") })) {
@@ -58,16 +65,16 @@ struct EconomyScreen: View {
                     }.pickerStyle(.segmented)
                     let visible = catalog.filter { !bag || inventory[$0.id, default: 0] > 0 }
                     if loaded && visible.isEmpty { Text(bag ? "Your backpack is empty." : "No gifts are available.") }
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 3), spacing: 16) {
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 4), spacing: 10) {
                         ForEach(visible) { gift in
                             Button { selected = gift } label: {
                                 VStack {
-                                    NativeArt("store", 3 + gift.id).scaledToFit().frame(height: 65)
-                                    Text(gift.name).font(.caption)
+                                    NativeArt("store", 3 + gift.id).scaledToFit().frame(height: 55)
+                                    Text(gift.name).font(.caption2).lineLimit(2).multilineTextAlignment(.center)
                                     Text(bag ? "× \(inventory[gift.id, default: 0])" : gift.price == 0 ? "Free" : "\(gift.price) coins")
                                         .font(.caption2)
-                                }.frame(maxWidth: .infinity)
-                            }
+                                }.padding(4).frame(maxWidth: .infinity,minHeight: 108).background(.white,in: RoundedRectangle(cornerRadius: 12))
+                            }.buttonStyle(.plain)
                         }
                     }
                 }
@@ -76,26 +83,43 @@ struct EconomyScreen: View {
             }.padding().frame(maxWidth: .infinity, alignment: .leading)
         }
         .navigationTitle(route.name == "wallet" ? "My wallet" : route.name == "level" ? "My level" : "Store")
-        .background(Color.mint.opacity(0.08))
-        .task(id: route) { await load() }
-        .sheet(item: $selected) { gift in
+        .navigationBarTitleDisplayMode(.inline)
+        .preferredColorScheme(.light)
+        .background { AccountBackdrop(group: route.name == "wallet" ? "wallet" : route.name == "level" ? "level" : "store") }
+        .task(id: route) {
+            await load()
+            if let id = returnGiftID, app.route == route, !Task.isCancelled {
+                selected = catalog.first { $0.id == id }; returnGiftID = nil
+            }
+        }
+        .sheet(item: $selected, onDismiss: {
+            if navigateToWallet { navigateToWallet = false; app.go("wallet") }
+        }) { gift in
             VStack(spacing: 14) {
-                NativeArt("store", 3 + gift.id).scaledToFit().frame(height: 100)
-                Text(gift.name).font(.title2.bold())
+                if !bag {
+                    Text((balance ?? gift.price) < gift.price ? "Insufficient balance" : "Confirm gift").font(.title2.bold())
+                }
+                NativeArt("store", 3 + gift.id).scaledToFit().frame(height: 76)
+                Text(gift.name).font(.headline)
                 if bag { Text("Owned: \(inventory[gift.id, default: 0])") }
                 else {
                     Text(gift.price > 0 ? "Add one for \(gift.price) star coins." : "Claim one free gift for today.")
                     if let balance { Text("Balance: \(balance) star coins") }
                     if let balance, balance < gift.price {
-                        Button("Open wallet") { selected = nil; app.go("wallet") }
+                        Button { returnGiftID = gift.id; navigateToWallet = true; selected = nil } label: {
+                            Text("Open wallet").font(.headline).foregroundStyle(.black)
+                                .frame(maxWidth: 280,minHeight: 44).background(LinearGradient(colors:[.mint,.cyan],startPoint:.leading,endPoint:.trailing),in: Capsule())
+                        }
                     } else {
-                        Button("Confirm") { Task { await acquire(gift) } }.disabled(balance == nil || busy)
-                            .buttonStyle(.borderedProminent)
+                        Button { Task { await acquire(gift) } } label: {
+                            NativeArt("spend",4).scaledToFit().frame(maxWidth: 282,minHeight: 48)
+                        }.buttonStyle(.plain).accessibilityLabel("Confirm")
+                            .disabled(balance == nil || busy).opacity(balance == nil || busy ? 0.48 : 1)
                     }
                 }
                 if !notice.isEmpty { Text(notice).font(.footnote) }
                 Button("Close") { selected = nil }.disabled(busy)
-            }.padding().presentationDetents([.medium]).interactiveDismissDisabled(busy)
+            }.padding().frame(maxWidth: .infinity,maxHeight: .infinity).background { NativeArt("spend",1).ignoresSafeArea() }.presentationDetents([.medium]).interactiveDismissDisabled(busy)
         }
     }
 
@@ -133,5 +157,47 @@ struct EconomyScreen: View {
             selected = nil
             await load()
         } catch { notice = error.localizedDescription }
+    }
+}
+
+private struct LevelJourney: View {
+    let current: Int
+    private let badges = [12,11,10,9,8,7,6,5,4,13,3,2,1]
+    private let rowHeight: CGFloat = 108
+    private let top: CGFloat = 32
+
+    var body: some View {
+        GeometryReader { box in
+            let width = box.size.width
+            let badgeWidth = min(91,width * 0.24)
+            let inset = badgeWidth / 2
+            let centers = [inset,width / 2,width - inset]
+            ZStack(alignment: .topLeading) {
+                Path { path in
+                    path.move(to: CGPoint(x: centers[0], y: top))
+                    for row in 0..<4 {
+                        let right = row.isMultiple(of: 2)
+                        let start = right ? centers[2] : centers[0]
+                        let outside = right ? width - 12 : 12
+                        let y = top + CGFloat(row) * rowHeight
+                        path.addLine(to: CGPoint(x: start,y: y))
+                        path.addQuadCurve(to: CGPoint(x: outside,y: y + rowHeight * 0.4),
+                                          control: CGPoint(x: outside,y: y))
+                        path.addLine(to: CGPoint(x: outside,y: y + rowHeight * 0.6))
+                        path.addQuadCurve(to: CGPoint(x: start,y: y + rowHeight),
+                                          control: CGPoint(x: outside,y: y + rowHeight))
+                    }
+                }.stroke(.white,style: StrokeStyle(lineWidth: 10,lineCap: .round,lineJoin: .round))
+                    .accessibilityHidden(true)
+                ForEach(badges.indices,id: \.self) { level in
+                    let row = level / 3
+                    let column = row.isMultiple(of: 2) ? level % 3 : 2 - level % 3
+                    NativeArt("medals",badges[level] + (level <= current ? 0 : 13))
+                        .scaledToFit().frame(width: badgeWidth,height: 44)
+                        .position(x: centers[column],y: top + CGFloat(row) * rowHeight)
+                        .accessibilityLabel("VIP \(level), " + (level <= current ? "earned" : "locked"))
+                }
+            }
+        }.frame(height: top + rowHeight * 4 + 30)
     }
 }

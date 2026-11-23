@@ -13,6 +13,7 @@ final class MiNaAppModel: ObservableObject {
     @Published var signedIn = false
     @Published var busy = false
     @Published var accountError = ""
+    @Published var companionTopic: Int?
     @Published var tab = "rooms"
     @Published var path: [NativeRoute] = []
     @Published private var snapshot: [String: Any] = [:]
@@ -160,30 +161,46 @@ struct MiNaRoot: View {
                         ("messages", "Messages", 3), ("profile", "Profile", 4)]
 
     var body: some View {
-        NavigationStack(path: $app.path) {
-            Group {
-                if app.signedIn { destination(NativeRoute(name: app.tab)) }
-                else { WelcomeScreen() }
+        VStack(spacing: 0) {
+            NavigationStack(path: $app.path) {
+                Group {
+                    if app.signedIn { destination(NativeRoute(name: app.tab)) }
+                    else { WelcomeScreen() }
+                }
+                .navigationDestination(for: NativeRoute.self) { route in destination(route) }
             }
-            .navigationDestination(for: NativeRoute.self) { route in destination(route) }
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay(alignment: .bottomTrailing) {
+                if app.signedIn && app.tab == "rooms" && app.path.isEmpty {
+                    Button { app.go("rooms.create") } label: {
+                        NativeArt("home", 21).scaledToFit().frame(width: 60, height: 62)
+                    }
+                    .buttonStyle(.plain).padding(.trailing, 17).padding(.bottom, 13)
+                    .accessibilityLabel("Create a room")
+                }
+            }
             if app.signedIn && app.path.isEmpty {
                 HStack(spacing: 0) {
                     ForEach(tabs.indices, id: \.self) { index in
                         let item = tabs[index]
                         Button { app.tab = item.0 } label: {
                             NativeArt("tabs", item.2 == 5 || app.tab == item.0 ? item.2 : item.2 + 5)
-                                .scaledToFit().frame(width: item.2 == 5 ? 46 : 26, height: 44)
+                                .scaledToFit().frame(width: item.2 == 5 ? 41 : 24, height: 44)
                                 .frame(maxWidth: .infinity).contentShape(Rectangle())
                         }
                         .accessibilityLabel(item.1)
                         .accessibilityAddTraits(app.tab == item.0 ? .isSelected : [])
                     }
                 }
-                .padding(.vertical, 4).background(.regularMaterial)
+                .padding(.vertical, 5)
+                .background {
+                    RoundedRectangle(cornerRadius: 20).fill(.white).shadow(color: .black.opacity(0.07), radius: 2, y: -1)
+                        .padding(.bottom, -24).ignoresSafeArea(edges: .bottom)
+                }
             }
         }
+        .accessibilityHidden(app.companionTopic != nil)
+        .overlay { if app.signedIn, let topic = app.companionTopic { CompanionTopicOverlay(topic: topic) } }
         .overlay(alignment: .top) { if app.signedIn { IncomingCallBanner() } }
         .tint(Color(red: 0.04, green: 0.43, blue: 0.43))
         .task { await app.restore() }
@@ -209,18 +226,31 @@ private struct WelcomeScreen: View {
     var body: some View {
         ZStack {
             nativeArtwork("signIn", "welcome").ignoresSafeArea().accessibilityHidden(true)
-            VStack(spacing: 14) {
-                Spacer()
-                Text("MiNa").font(.system(size: 42, weight: .heavy))
-                Text("Sleep better.\nTalk deeper.").multilineTextAlignment(.center)
-                Spacer().frame(height: 30)
-                Button(app.busy ? "Connecting…" : "Continue") { Task { await app.enter(create: true) } }
-                    .buttonStyle(.borderedProminent).controlSize(.large).disabled(!consent || app.busy)
-                Toggle("I agree to the terms and privacy policy", isOn: $consent).fixedSize(horizontal: false, vertical: true)
-                HStack { Button("Terms") { app.go("legal.terms") }; Button("Privacy Policy") { app.go("legal.privacy") } }
-                if !app.accountError.isEmpty { Text(app.accountError).font(.footnote) }
+            GeometryReader { geometry in
+                VStack(spacing: 8) {
+                    Spacer(minLength: 0)
+                    Text("MiNa").font(.system(size: 34, weight: .heavy))
+                    Text("Sleep better.\nTalk deeper.").font(.headline).multilineTextAlignment(.center)
+                    Button { Task { await app.enter(create: true) } } label: {
+                        Text(app.busy ? "Connecting…" : "Continue").font(.headline)
+                            .foregroundStyle(Color(red: 0.03, green: 0.32, blue: 0.39))
+                            .frame(width: geometry.size.width * 0.72, height: 52)
+                            .background(.white, in: Capsule()).overlay { Capsule().stroke(.cyan.opacity(0.4), lineWidth: 2) }
+                    }.disabled(!consent || app.busy).padding(.top, 16)
+                    HStack(spacing: 5) {
+                        Button { consent.toggle() } label: {
+                            Image(systemName: consent ? "checkmark.circle.fill" : "circle")
+                            Text("I agree to the")
+                        }.accessibilityLabel("Agree to the terms and privacy policy").accessibilityValue(consent ? "Selected" : "Unselected")
+                        Button("Terms") { app.go("legal.terms") }.underline()
+                        Text("and")
+                        Button("Privacy Policy") { app.go("legal.privacy") }.underline()
+                    }.font(.footnote.weight(.semibold)).padding(.horizontal, 8).padding(.vertical, 6)
+                        .background(.black.opacity(0.28), in: Capsule())
+                    if !app.accountError.isEmpty { Text(app.accountError).font(.footnote).multilineTextAlignment(.center) }
+                    Spacer().frame(height: geometry.size.height * 0.15)
+                }.frame(maxWidth: .infinity).foregroundStyle(.white).buttonStyle(.plain)
             }
-            .foregroundStyle(.white).padding(28).shadow(color: .black.opacity(0.35), radius: 3)
         }.toolbar(.hidden, for: .navigationBar)
     }
 }

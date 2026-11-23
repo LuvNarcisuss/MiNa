@@ -66,6 +66,8 @@ struct MessagesScreen: View {
             if route.name == "messages.call" { VoiceCallScreen(id: route.id ?? "") }
             else { MessageListScreen(route: route) }
         }.id(route.name + (route.id ?? ""))
+        .environment(\.colorScheme, .light)
+        .preferredColorScheme(route.name == "messages" ? .dark : .light)
     }
 }
 
@@ -109,30 +111,54 @@ private struct MessageListScreen: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                if !inbox { Button { app.back() } label: { Image(systemName: "chevron.left").frame(width: 44,height: 44) }.accessibilityLabel("Back") }
-                Text(title).font(inbox ? .largeTitle.bold() : .title3.bold()).lineLimit(1)
-                Spacer()
-                if inbox {
-                    Button("Calls") { app.go("messages.calls") }
-                    Button { operate { try await markAll() } } label: { NativeArt("inbox", 2).frame(width: 30,height: 30) }.accessibilityLabel("Mark all as read")
-                } else if thread {
-                    Button { app.go("person",peer) } label: { NativeArt("chat",3).frame(width: 30,height: 30) }.accessibilityLabel("Profile and safety")
-                } else if !calls {
-                    Button("Read all") { operate { try await markNotices() } }
+            ZStack {
+                if !inbox { Text(title).font(.headline).lineLimit(1).padding(.horizontal, 55) }
+                HStack(spacing: 10) {
+                    if inbox {
+                        Text(title).font(.system(size: 26, weight: .bold)).foregroundStyle(.white)
+                        Spacer()
+                        Button { app.go("messages.calls") } label: {
+                            Image(systemName: "phone").frame(width: 44, height: 44)
+                        }.foregroundStyle(.white).accessibilityLabel("Recent calls")
+                    } else {
+                        Button { app.back() } label: {
+                            NativeArt("notice", 2).frame(width: 24, height: 24).frame(width: 44, height: 44)
+                        }.accessibilityLabel("Back")
+                        Spacer()
+                    }
+                    if inbox || (!thread && !calls) {
+                        Button { operate { if inbox { try await markAll() } else { try await markNotices() } } } label: {
+                            NativeArt(inbox ? "inbox" : "notice", inbox ? 2 : 3).scaledToFit()
+                                .frame(width: inbox ? 34 : 24).frame(width: 44, height: 44)
+                        }.accessibilityLabel("Mark all as read")
+                    } else if thread {
+                        Button { app.go("person",peer) } label: {
+                            NativeArt("chat",3).frame(width: 24,height: 24).frame(width: 44, height: 44)
+                        }.accessibilityLabel("Profile and safety")
+                    }
                 }
-            }.padding(.horizontal).frame(minHeight: 54)
+            }.padding(.horizontal, inbox ? 18 : 6).frame(minHeight: 44)
             if !error.isEmpty {
-                HStack { Text(error).font(.footnote); Spacer(); Button("Retry") { Task { await refresh() } } }.padding(.horizontal)
+                HStack { Text(error).font(.footnote); Spacer(); Button("Retry") { Task { await refresh() } } }
+                    .padding(10).background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12)).padding(.horizontal)
             }
-            if inbox { TextField("Search conversations", text: $query).textFieldStyle(.roundedBorder).padding(.horizontal) }
+            if inbox {
+                HStack {
+                    NativeArt("inbox", 11).frame(width: 18, height: 18)
+                    TextField("", text: $query, prompt: Text("Search conversations").foregroundColor(.white.opacity(0.8)))
+                        .foregroundStyle(.white).accessibilityLabel("Search conversations")
+                }.padding(.horizontal, 13).frame(height: 40).background(.white.opacity(0.23), in: Capsule())
+                    .overlay { Capsule().stroke(.white.opacity(0.6), lineWidth: 1) }.padding(.horizontal, 18).padding(.bottom, 8)
+            }
             if !loaded && error.isEmpty { ProgressView().padding() }
             ScrollViewReader { proxy in
             List {
-                if inbox { inboxContent }
-                else if thread { threadContent }
-                else if calls { callContent }
-                else { noticeContent }
+                Group {
+                    if inbox { inboxContent }
+                    else if thread { threadContent }
+                    else if calls { callContent }
+                    else { noticeContent }
+                }.listRowSeparator(.hidden).listRowInsets(EdgeInsets(top: 4, leading: 18, bottom: 4, trailing: 18)).listRowBackground(Color.clear)
             }.listStyle(.plain).scrollContentBackground(.hidden)
             .onChange(of: rows.first?.id) { newest in
                 if thread, let newest, lastRead.isEmpty || rows.first?.string("sender_id") == me {
@@ -142,7 +168,9 @@ private struct MessageListScreen: View {
             }
             if thread { composer }
         }
-        .background { NativeArt(inbox ? "inbox" : "chat",1).ignoresSafeArea().accessibilityHidden(true) }
+        .buttonStyle(.plain)
+        .toolbar(.hidden, for: .navigationBar)
+        .background { NativeArt(inbox ? "inbox" : thread ? "chat" : category ? "noticeDetail" : "notice",1).ignoresSafeArea().accessibilityHidden(true) }
         .task {
             if thread, let saved = app.state(draftKey) as? [String:String] {
                 draft = saved["body"] ?? ""
@@ -154,10 +182,22 @@ private struct MessageListScreen: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .inboxUpdated)) { _ in Task { await refresh() } }
-        .alert("Clear this conversation?", isPresented: Binding(get: { clear != nil }, set: { if !$0 { clear = nil } })) {
-            if let selected = clear { Button("Clear my copy", role: .destructive) { operate { try await mark(selected.id, selected.string("latest_id"), clear: true) } } }
-            Button("Cancel", role: .cancel) {}
-        } message: { Text("This clears your copy of the conversation through the selected message.") }
+        .overlay {
+            if let selected = clear {
+                ZStack(alignment: .bottom) {
+                    Color.black.opacity(0.4).ignoresSafeArea().onTapGesture { clear = nil }
+                    VStack(spacing: 16) {
+                        Text("Clear this conversation?").font(.headline)
+                        Text("Clear your copy through the selected message.").font(.subheadline)
+                        Button("Clear my copy", role: .destructive) {
+                            clear = nil
+                            operate { try await mark(selected.id, selected.string("latest_id"), clear: true) }
+                        }.frame(maxWidth: .infinity).padding(12).background(.white, in: Capsule())
+                        Button("Cancel") { clear = nil }
+                    }.padding(24).frame(maxWidth: .infinity).background(Color(red: 0.88, green: 0.98, blue: 0.96), in: RoundedRectangle(cornerRadius: 22))
+                }
+            }
+        }
         .confirmationDialog("Start a voice call?", isPresented: $confirmCall) {
             Button("Call \(title)") { operate {
                 let result = try await rpc("start_voice_call", ["p_id": dialID, "p_peer": peer])
@@ -179,7 +219,7 @@ private struct MessageListScreen: View {
             }.listRowBackground(Color.clear)
         }
         Button { app.go("messages.notices") } label: {
-            HStack { NativeArt("inbox",5).frame(width: 46,height: 46); Text("System notifications"); Spacer(); badge(notices) }
+            HStack { NativeArt("inbox",5).scaledToFit().frame(width: 46,height: 46); VStack(alignment: .leading, spacing: 4) { Text("System notifications").font(.headline); Text("Updates from MiNa").font(.caption).foregroundStyle(.secondary) }; Spacer(); badge(notices) }.messageCard()
         }
         let filtered = rows.filter { query.isEmpty || (($0.string("body") + (people[$0.id]?.string("name") ?? "")).localizedCaseInsensitiveContains(query)) }
         ForEach(filtered) { row in
@@ -187,10 +227,10 @@ private struct MessageListScreen: View {
                 HStack { InboxAvatar(person: people[row.id]); VStack(alignment: .leading) {
                     Text(people[row.id]?.string("name") ?? "Listener").bold()
                     Text(row.roomID == nil ? row.string("body") : "Voice room invitation").lineLimit(1).foregroundStyle(.secondary)
-                }; Spacer(); VStack(alignment: .trailing) { Text(row.timestamp).font(.caption2); badge(row.count("unread")) } }
+                }; Spacer(); VStack(alignment: .trailing) { Text(row.timestamp).font(.caption2); badge(row.count("unread")) } }.messageCard()
             }.swipeActions { Button("Clear", role: .destructive) { clear = row } }
         }
-        if loaded && filtered.isEmpty { Text(query.isEmpty ? "No conversations yet." : "No matching conversations.") }
+        if loaded && filtered.isEmpty { emptyMessage(query.isEmpty ? "No conversations yet." : "No matching conversations.") }
     }
 
     @ViewBuilder func badge(_ count: Int) -> some View {
@@ -202,7 +242,11 @@ private struct MessageListScreen: View {
             ForEach(categories, id: \.self) { kind in
                 Button { app.go("messages.notices.category",kind) } label: {
                     HStack { NativeArt("notice",kind == "platform" ? 4 : kind == "follow" ? 6 : 7).frame(width: 44,height: 44)
-                        Text(titles[kind] ?? kind); Spacer(); badge(rows.filter { $0.string("kind") == kind && $0.string("read_at").isEmpty }.count) }
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(titles[kind] ?? kind).font(.headline)
+                            Text(rows.first(where: { $0.string("kind") == kind })?.string("body") ?? ["platform": "News and service updates", "follow": "People who followed you", "ranking": "Your room and gift rankings"][kind] ?? "")
+                                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }; Spacer(); badge(rows.filter { $0.string("kind") == kind && $0.string("read_at").isEmpty }.count) }.messageCard()
                 }
             }
         } else {
@@ -217,10 +261,10 @@ private struct MessageListScreen: View {
                         HStack { Text(row.string("title")).bold(); if row.string("read_at").isEmpty { Text("New").font(.caption).foregroundStyle(.teal) } }
                         Text(row.string("body")).lineLimit(opened == row.id ? nil : 2)
                         Text(row.timestamp).font(.caption).foregroundStyle(.secondary)
-                    }
+                    }.messageCard()
                 }
             }
-            if loaded && rows.isEmpty { Text("No notifications yet.") }
+            if loaded && rows.isEmpty { emptyMessage("No notifications yet.") }
         }
     }
 
@@ -238,14 +282,16 @@ private struct MessageListScreen: View {
                 } }
             }
         }
-        if loaded && rows.isEmpty { Text("No calls yet.") }
+        if loaded && rows.isEmpty { emptyMessage("No calls yet.") }
     }
 
     @ViewBuilder var threadContent: some View {
         if let person = people[peer] {
-            HStack { Button { app.go("person", peer) } label: { InboxAvatar(person: person,size: 64) }; Spacer()
-                Button("Voice call") { confirmCall = true }.disabled(!person.flag("allow_calls") || busy)
-            }.buttonStyle(.borderless)
+            VStack(spacing: 6) {
+                Button { app.go("person", peer) } label: { InboxAvatar(person: person, size: 102) }.accessibilityLabel("View profile")
+                Button { confirmCall = true } label: { NativeArt("chat", 4).scaledToFit().frame(width: 74, height: 38) }
+                    .disabled(!person.flag("allow_calls") || busy).accessibilityLabel("Voice call")
+            }.frame(maxWidth: .infinity)
         }
         if rows.count >= take { Button("Load earlier messages") { take += 50; Task { await refresh() } } }
         ForEach(rows.reversed()) { row in
@@ -256,12 +302,12 @@ private struct MessageListScreen: View {
                     if let room = row.roomID { Button("Open voice room invitation") { app.go("rooms.live",room) } }
                     else { Text(row.string("body")).textSelection(.enabled) }
                     Text(row.timestamp).font(.caption2).foregroundStyle(.secondary)
-                }.padding(10).background(own ? Color.mint.opacity(0.28) : Color.white.opacity(0.92),in: RoundedRectangle(cornerRadius: 15))
+                }.padding(10).background(own ? Color(red: 0.42, green: 0.87, blue: 0.8) : Color.white.opacity(0.92),in: RoundedRectangle(cornerRadius: 15))
                 if !own { Spacer(minLength: 36) }
             }.listRowBackground(Color.clear).listRowSeparator(.hidden)
             .onAppear { if row.id == rows.first?.id && row.id != lastRead { Task { do { try await mark(peer,row.id); lastRead = row.id } catch { self.error = error.localizedDescription } } } }
         }
-        if loaded && rows.isEmpty { Text("Start a conversation.") }
+        if loaded && rows.isEmpty { emptyMessage("Start a conversation.") }
     }
 
     var composer: some View {
@@ -269,11 +315,16 @@ private struct MessageListScreen: View {
             if showEmoji { HStack { ForEach(["🌙","✨","💚","😴","🌟","🫶"], id: \.self) { emoji in Button(emoji) { edit(draft + emoji) } } } }
             HStack {
                 Button { showEmoji.toggle() } label: { NativeArt("chat",5).frame(width: 32,height: 32) }.accessibilityLabel("Choose an emoji")
-                TextField("Message…",text: Binding(get: { draft }, set: edit)).textFieldStyle(.roundedBorder)
-                Button { operate { try await send() } } label: { NativeArt("chat",6).frame(width: 38,height: 38) }
+                TextField("Message…",text: Binding(get: { draft }, set: edit))
+                Button { operate { try await send() } } label: { NativeArt("chat",6).scaledToFit().frame(width: 64,height: 45) }
                     .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).accessibilityLabel("Send message")
-            }
-        }.padding().disabled(busy || people[peer]?.flag("allow_messages") != true)
+            }.padding(.horizontal, 8).background(.white, in: Capsule())
+        }.padding(.horizontal, 16).padding(.bottom, 4).disabled(busy || people[peer]?.flag("allow_messages") != true)
+    }
+
+    private func emptyMessage(_ text: String) -> some View {
+        Text(text).font(.subheadline).foregroundStyle(.secondary).padding(.vertical, 25)
+            .frame(maxWidth: .infinity)
     }
 
     private func edit(_ value: String) {
@@ -356,5 +407,13 @@ private struct MessageListScreen: View {
                 rows = values.map(InboxRow.init(values:)); loaded = true; error = ""
             } catch { if !Task.isCancelled { self.error = error.localizedDescription } }
         } while refreshPending && !Task.isCancelled
+    }
+}
+
+
+private extension View {
+    func messageCard() -> some View {
+        frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12).background(.white, in: RoundedRectangle(cornerRadius: 13))
     }
 }

@@ -154,10 +154,10 @@ struct VoiceCallScreen: View {
     var body: some View {
         VStack(spacing: 20) {
             HStack { Button { if active && !stopped { end(incoming && state == "ringing" ? "decline" : "end") } else { app.back() } } label: {
-                Image(systemName:"chevron.left").frame(width:44,height:44)
+                NativeArt("call",2).frame(width:24,height:24).frame(width:44,height:44)
             }.accessibilityLabel("Back"); Spacer(); Text("Voice call").bold(); Spacer(); Color.clear.frame(width:44,height:44) }
             Spacer()
-            ZStack { NativeArt("call",4).frame(width:180,height:180); InboxAvatar(person:person,size:120) }
+            ZStack { NativeArt("call",4).frame(width:260,height:260); InboxAvatar(person:person,size:177) }
             Text(person?.string("name") ?? "Voice call").font(.title.bold())
             if let connectedAt { Text(connectedAt,style:.timer).monospacedDigit() } else { Text(label) }
             if !error.isEmpty { Text(error).font(.footnote).multilineTextAlignment(.center) }
@@ -177,7 +177,7 @@ struct VoiceCallScreen: View {
                     .accessibilityLabel(speaker ? "Use earpiece" : "Use speaker")
                 }
                 if active && !stopped {
-                    Button { end(incoming && state == "ringing" ? "decline" : "end") } label: { NativeArt("call",5).frame(width:62,height:62) }
+                    Button { end(incoming && state == "ringing" ? "decline" : "end") } label: { NativeArt("call",5).scaledToFit().frame(width:150,height:56) }
                     .accessibilityLabel(incoming && state == "ringing" ? "Decline" : "End call")
                 } else { Button("Close") { app.back() }.buttonStyle(.bordered) }
                 if state == "accepted" && !stopped {
@@ -185,7 +185,7 @@ struct VoiceCallScreen: View {
                     .disabled(peer == nil).accessibilityLabel(muted ? "Unmute" : "Mute")
                 }
             }.padding(.bottom,30)
-        }.padding().background { NativeArt("chat",1).ignoresSafeArea() }
+        }.padding(.horizontal, 14).background { NativeArt("call",1).ignoresSafeArea() }.toolbar(.hidden, for: .navigationBar)
         .task {
             while !Task.isCancelled {
                 await synchronize()

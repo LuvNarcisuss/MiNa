@@ -15,6 +15,7 @@ struct RoomLiveView: View {
     @StateObject private var player = RoomPlayer()
     @State private var panel: RoomPanel?
     @State private var seat = 1
+    @State private var listenerID = ""
     @State private var message = ""
     @State private var ops: [String:String] = [:]
     @State private var busy = false
@@ -33,12 +34,11 @@ struct RoomLiveView: View {
                 let members = session.members.filter { $0["seat"] is Int }
                 let seats = members.reduce(into: [Int:String]()) { result,row in if let n = row["seat"] as? Int { result[n] = session.name(row.roomText("user_id")) } }
                 let portraits = members.reduce(into: [Int:URL]()) { result,row in if let n = row["seat"] as? Int { result[n] = session.pictures[row.roomText("user_id")] } }
-                RoomStageFrame(title: room.roomText("title"),topic: room.roomText("topic"),cover: room.roomText("cover"),host: session.name(hostID),hostStatus: seats[0] == nil ? "Host away" : "Host",audience: session.active ? session.members.count : nil,runtime: max(0,Int(-(roomDate(room.roomText("created_at")) ?? Date()).timeIntervalSinceNow / 60)),seats: seats,portraits: portraits,gifts: room.roomFlag("allow_gifts") && session.active,open: { next,n in seat = n; panel = next }) {
+                RoomStageFrame(title: room.roomText("title"),topic: room.roomText("topic"),cover: room.roomText("cover"),host: session.name(hostID),hostStatus: seats[0] == nil ? "Host away" : "Host",audience: session.active ? session.members.count : nil,runtime: max(0,Int(-(roomDate(room.roomText("created_at")) ?? Date()).timeIntervalSinceNow / 60)),seats: seats,portraits: portraits,gifts: room.roomFlag("allow_gifts") && session.active,open: { next,n in seat = n; listenerID = ""; panel = next }) {
                     VStack(alignment: .leading,spacing: 10) {
                         Text(session.active ? (session.connections > 0 ? "Voice connected · \(session.connections) peers" : "In room · No voice connection yet") : session.status)
                         Text("Microphone: " + session.mic).font(.caption)
                         ForEach(Array(session.messages.suffix(3).enumerated()),id: \.offset) { _,row in Text(chatText(row)).font(.subheadline) }
-                        Button("Room chat") { panel = .chat }.buttonStyle(.bordered)
                         if !session.notice.isEmpty { Text(session.notice).font(.caption) }
                     }.frame(maxWidth: .infinity,alignment: .leading).padding().background(.black.opacity(0.35),in: RoundedRectangle(cornerRadius: 16))
                 }
@@ -65,23 +65,20 @@ struct RoomLiveView: View {
         .onChange(of: playKey) { _ in
             if listen, session.active, let track { player.play(track,from: roomDate(session.room?.roomText("music_started_at") ?? "")) } else { player.stop() }
         }
-        .sheet(item: $panel) { next in
-            NavigationStack {
+        .roomOverlay($panel) { next in
                 Group {
                     switch next {
                     case .ranking: RoomRankings(room: id)
-                    case .gift: RoomGifts(id: id,session: session,openWallet: {
+                    case .gift: RoomGifts(id: id,session: session,initialRecipient: listenerID.isEmpty ? nil : listenerID,close: { panel = nil },openWallet: {
                         try app.save(resumeKey,Date().timeIntervalSince1970); panel = nil; app.go("wallet")
                     })
                     case .share: RoomInvitations(id: id)
-                    default: Form {
+                    default: RoomPanelList {
                         controls(next)
                         if !session.notice.isEmpty { Text(session.notice) }
                     }
                     }
-                }.navigationTitle(next == .exit && session.host ? "End this room?" : next.rawValue)
-                    .navigationBarTitleDisplayMode(.inline).toolbar { Button("Done") { panel = nil } }
-            }
+                }
         }
     }
     func chatText(_ row: RoomRow) -> String {
@@ -104,9 +101,13 @@ struct RoomLiveView: View {
     @ViewBuilder func controls(_ next: RoomPanel) -> some View {
         switch next {
         case .host:
-            Text(session.room?.roomText("title") ?? "Room")
-            Text("Host: " + session.name(hostID)); Text("Audience: \(session.members.count)")
-            Button("View host profile") { panel = nil; app.go(session.host ? "profile" : "person",hostID) }
+            HStack {
+                if let url = session.pictures[hostID] { AsyncImage(url: url) { image in image.resizable().scaledToFill() } placeholder: { Color.teal }.frame(width: 48,height: 48).clipShape(Circle()) }
+                else { RoomArtwork(session.room?.roomText("cover") ?? "moon-seat").scaledToFill().frame(width: 48,height: 48).clipShape(Circle()) }
+                VStack(alignment: .leading) { Text(session.name(hostID)).bold(); Text("Room host").font(.caption) }
+            }
+            VStack(alignment: .leading,spacing: 8) { Text(session.room?.roomText("title") ?? "Room").bold(); Text(session.room?.roomText("topic") ?? ""); Text("Audience: \(session.members.count)") }.frame(maxWidth: .infinity,alignment: .leading).padding().background(.white.opacity(0.85),in: RoundedRectangle(cornerRadius: 14))
+            Button("View host profile") { panel = nil; app.go(session.host ? "profile" : "person",hostID) }.buttonStyle(RoomCapsuleStyle())
             if !session.host,session.room?.roomFlag("allow_follow") == true {
                 Button(followed == true ? "Unfollow host" : "Follow host") { act {
                     let path = "follows?follower_id=eq." + me + "&followed_id=eq." + hostID
@@ -120,11 +121,21 @@ struct RoomLiveView: View {
         case .audience:
             ForEach(Array(session.members.enumerated()),id: \.offset) { _,m in
                 let who = m.roomText("user_id")
-                Button(session.name(who)) { panel = nil; app.go(who == me ? "profile" : "person",who) }
-                Text((m["seat"] as? Int).map { $0 == 0 ? "Host" : "Mic \($0)" } ?? "Listening").font(.caption)
+                Button { listenerID = who; panel = .listener } label: {
+                    HStack(spacing: 9) {
+                        memberPortrait(who); VStack(alignment: .leading) { Text(session.name(who)).bold(); Text((m["seat"] as? Int).map { $0 == 0 ? "Host" : "Mic \($0)" } ?? "Listening").font(.caption) }; Spacer(); Text("›")
+                    }.padding(10).background(.white.opacity(0.86),in: RoundedRectangle(cornerRadius: 13))
+                }.buttonStyle(.plain)
                 if session.host && who != me && m["seat"] is Int {
                     Button("Remove from mic") { act { try await updateMember(who,["seat":NSNull()]) } }.disabled(busy)
                 }
+            }
+        case .listener:
+            HStack { memberPortrait(listenerID); Text(session.name(listenerID)).font(.headline) }
+            Text(session.members.contains(where: { $0.roomText("user_id") == listenerID }) ? "In this room" : "Left the room")
+            Button("View profile") { panel = nil; app.go(listenerID == me ? "profile" : "person",listenerID) }.buttonStyle(RoomCapsuleStyle())
+            if listenerID != me, session.room?.roomFlag("allow_gifts") == true {
+                Button("Choose a gift") { panel = .gift }.buttonStyle(RoomCapsuleStyle())
             }
         case .mic: seatControls
         case .music:
@@ -133,7 +144,7 @@ struct RoomLiveView: View {
                 if player.playing.isEmpty,let track { listen = true; player.play(track,from: roomDate(session.room?.roomText("music_started_at") ?? "")) } else { listen = false; player.stop() }
             } }
             ForEach(RoomSound.all) { sound in
-                RoomChoiceRow(cover: sound.id,title: sound.title,detail: "Free · " + (session.host ? (track?.id == sound.id ? "Stop" : "Play") : "Request")) { act {
+                RoomMusicRow(sound: sound,button: session.host ? (track?.id == sound.id ? "Stop" : "Play") : "Request") { act {
                     if session.host {
                         let stop = track?.id == sound.id
                         let body: RoomRow = ["music_track":stop ? NSNull() as Any : sound.id,"music_started_at":stop ? NSNull() as Any : roomStamp(Date())]
@@ -159,10 +170,15 @@ struct RoomLiveView: View {
                     guard rows?.first != nil else { throw MiNaIssue("Could not end this room.") }
                 }
                 session.leave(app.api,id); player.stop(); panel = nil; app.go("rooms")
-            } }.disabled(busy)
+            } }.buttonStyle(RoomCapsuleStyle()).disabled(busy)
             Button("Stay in room") { panel = nil }
         default: EmptyView()
         }
+    }
+    @ViewBuilder private func memberPortrait(_ uid: String) -> some View {
+        if let url = session.pictures[uid] {
+            AsyncImage(url: url) { image in image.resizable().scaledToFill() } placeholder: { Color.teal.opacity(0.15) }.frame(width: 44,height: 44).clipShape(Circle())
+        } else { Text(String(session.name(uid).prefix(2))).bold().frame(width: 44,height: 44).background(Color.teal.opacity(0.15),in: Circle()) }
     }
     func updateMember(_ uid: String,_ body: RoomRow) async throws {
         let result = try await app.api.rest("room_members?" + session.memberFilter(id,uid),method: "PATCH",body: body,prefer: "return=representation") as? [RoomRow]
@@ -172,7 +188,11 @@ struct RoomLiveView: View {
         _ = try await app.api.rest("room_seat_requests?" + session.memberFilter(id,uid),method: "DELETE")
     }
     @ViewBuilder var seatControls: some View {
-        Text("Microphone audio stops when MiNa goes into the background. You choose when to turn it on again.")
+        HStack { NativeArt("queue",7).scaledToFit().frame(width: 60,height: 60)
+            VStack(alignment: .leading) { Text(session.mySeat != nil ? "Voice chatting" : "Microphone seats").font(.headline)
+                Text("Microphone " + session.mic.lowercased()).font(.caption) }
+        }.frame(maxWidth: .infinity,alignment: .leading).padding(9).background(.white.opacity(0.8),in: RoundedRectangle(cornerRadius: 13))
+        Text("Microphone audio stops when MiNa goes into the background.").font(.footnote)
         if session.mySeat != nil {
             Button(session.mic == "On" ? "Mute microphone" : session.mic == "Muted" ? "Unmute microphone" : "Turn on microphone") { act { try await session.speak(app.api,id) } }.disabled(!session.active || busy)
             Button(session.host ? "Turn microphone off" : "Leave microphone seat") { act { try await session.release(app.api,id) } }.disabled(busy)

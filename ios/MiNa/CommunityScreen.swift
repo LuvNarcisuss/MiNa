@@ -35,7 +35,9 @@ struct CommunityScreen: View {
             }
         }
         .id(route.name + (route.id ?? ""))
-        .background { NativeArt(route.name == "feed" ? "home" : "dreams", 1).scaledToFill().ignoresSafeArea().accessibilityHidden(true) }
+        .background { NativeArt(route.name == "feed" ? "home" : "dreams", 1).ignoresSafeArea().accessibilityHidden(true) }
+        .environment(\.colorScheme, .light)
+        .preferredColorScheme(route.name == "feed" ? .dark : .light)
         .tint(Color(red: 0.02, green: 0.43, blue: 0.43))
     }
 }
@@ -98,28 +100,40 @@ private struct CommunityListing: View {
                     let row = rows[i]
                     if activity { activityRow(row) }
                     else {
-                        CommunityEntry(row: row, profile: profiles[row.communityString("owner_id")] ?? [:], followed: follows.contains(row.communityString("owner_id")), detail: detail, update: { revision += 1 }, issue: { message = $0 }, focus: { editingComment = true })
+                        CommunityEntry(row: row, profile: profiles[row.communityString("owner_id")] ?? [:], followed: follows.contains(row.communityString("owner_id")), detail: detail, mine: mine, update: { revision += 1 }, issue: { message = $0 }, focus: { editingComment = true })
                             .id(row.communityString("id"))
                     }
                 }
                 ForEach(readIndices, id: \.self) { i in reading(i) }
                 if (loaded || name == "feed.read") && rows.isEmpty && readIndices.isEmpty {
                     VStack(spacing: 8) {
-                        NativeArt("search", 10).scaledToFit().frame(height: 86)
+                        NativeArt(activity && likes ? "likes" : "activity", activity && likes ? 5 : 4).scaledToFit().frame(width: 112,height: 108).accessibilityHidden(true)
                         Text(detail || name == "feed.read" ? "Content unavailable" : activity ? (likes ? "No likes yet" : "No comments yet") : !query.isEmpty ? "No matches" : dream ? "No dreams yet" : "No posts yet").font(.headline)
                         if detail { Text("This entry was removed or is no longer available to you.") }
                         if following { Text("Entries from people you follow will appear here.") }
-                    }.frame(maxWidth: .infinity).multilineTextAlignment(.center)
+                    }.font(.subheadline).foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(.top, activity ? 145 : 50).multilineTextAlignment(.center)
                 }
                 if more { Button("Load more") { limit += 30 } }
                 if detail && !dream && !rows.isEmpty { discussion }
-            }.padding()
+            }.padding(.horizontal, 20).padding(.vertical, 4)
         }
         .navigationTitle(name == "feed" ? "" : title)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(.hidden, for: .navigationBar)
+        .toolbar(name == "feed" ? .hidden : .visible, for: .navigationBar)
+        .toolbar {
+            if mine || (dream && !author && !detail) {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button { app.go(dream ? "dreams.compose" : "feed.compose") } label: {
+                        Text(dream && mine ? "Record" : "Post").communityPill()
+                    }.accessibilityLabel(dream ? "Record a dream" : "New post")
+                }
+            }
+        }
+        .safeAreaInset(edge: .bottom) { if detail && !dream && !rows.isEmpty { commentInput.padding(.horizontal,12) } }
         .refreshable { revision += 1 }
         .overlay(alignment: .bottomTrailing) {
-            if name == "feed" { Button { app.go("ai") } label: { Image(systemName: "moon.stars.fill").padding(13).background(.thinMaterial, in: Circle()) }.accessibilityLabel("Open AI Companion").padding() }
+            if name == "feed" { Button { app.go("ai") } label: { NativeArt("inbox",6).scaledToFit().frame(width:25,height:25).padding(14).background(LinearGradient(colors:[Color.mint,Color(red:0.68,green:0.59,blue:0.95)],startPoint:.top,endPoint:.bottom),in:Circle()).shadow(color:.black.opacity(0.12),radius:4) }.accessibilityLabel("Open AI Companion").padding() }
         }
         .onAppear { if name == "feed.likes" { likes = true } }
         .onChange(of: "\(following)|\(likes)|\(query)") { _ in rows = []; more = false; loaded = false; failure = "" }
@@ -138,21 +152,38 @@ private struct CommunityListing: View {
     }
     @ViewBuilder private var controls: some View {
         if name == "feed" {
+            HStack(spacing:5) {
+                ForEach([false,true], id: \.self) { selected in
+                    Button { following = selected } label: {
+                        VStack(spacing: 3) {
+                            Text(selected ? "Following" : "Recommended").font(.headline).lineLimit(1).minimumScaleFactor(0.75)
+                            Capsule().fill(selected == following ? Color.mint : .clear).frame(height: 3)
+                        }
+                    }.frame(minHeight: 44).foregroundStyle(.white.opacity(selected == following ? 1 : 0.72))
+                    .accessibilityAddTraits(following == selected ? .isSelected : [])
+                }
+                Spacer()
+                Button { app.go("feed.compose") } label: { NativeArt("feed",15).scaledToFit().frame(width: 31,height: 31).frame(minWidth: 44,minHeight: 44) }.accessibilityLabel("New post")
+                Button { app.go("feed.activity") } label: { NativeArt("feed",3).scaledToFit().frame(width: 34,height: 34).frame(minWidth: 44,minHeight: 44) }.accessibilityLabel("Post activity")
+            }
             HStack {
-                Picker("Feed", selection: $following) { Text("Recommended").tag(false); Text("Following").tag(true) }.pickerStyle(.segmented)
-                Button { app.go("feed.activity") } label: { NativeArt("feed",3).scaledToFit().frame(width: 24, height: 24).frame(width: 44,height: 44) }.accessibilityLabel("Post activity")
-            }
-            TextField("Search post captions", text: $query).textFieldStyle(.roundedBorder).onChange(of: query) { _ in limit = 30 }
-            HStack { Text(following ? "Following" : "Night feed").font(.title.bold()); Spacer(); Button("＋ Post") { app.go("feed.compose") }.buttonStyle(.bordered) }
+                NativeArt("feed",2).scaledToFit().frame(width: 21,height: 21)
+                TextField("", text: $query, prompt: Text("Search post captions").foregroundColor(.white.opacity(0.85))).foregroundStyle(.white)
+                    .accessibilityLabel("Search post captions").onChange(of: query) { _ in limit = 30 }
+            }.padding(.horizontal,14).frame(minHeight: 44).background(.white.opacity(0.24),in: Capsule())
         } else {
-            if mine {
-                Button(dream ? "Record a dream" : "New post") { app.go(dream ? "dreams.compose" : "feed.compose") }
-            }
             if activity {
-                Picker("Activity", selection: $likes) { Text("Comments").tag(false); Text("Likes").tag(true) }.pickerStyle(.segmented)
+                HStack(spacing: 0) {
+                    ForEach([false,true],id: \.self) { tab in
+                        Button { likes = tab } label: {
+                            Text(tab ? "Likes" : "Comments").font(.subheadline.weight(.medium)).foregroundStyle(tab == likes ? Color.teal : Color.secondary)
+                                .frame(maxWidth: .infinity).padding(.vertical,8).background(tab == likes ? Color.white : .clear,in: Capsule())
+                        }.frame(minHeight:44).accessibilityAddTraits(likes == tab ? .isSelected : [])
+                    }
+                }.padding(.horizontal,3).background(.white.opacity(0.55),in: Capsule())
             } else if dream && !mine && !author && !detail {
                 Button { app.go("dreams.compose") } label: { NativeArt("dreams",15).scaledToFit() }.accessibilityLabel("Record a dream")
-                HStack { Text("Dream Square").font(.title.bold()); Spacer(); Button(following ? "Following ✓" : "Following") { following.toggle() } }
+                HStack { NativeArt("dreams",16).scaledToFit().frame(width:104,height:20).accessibilityLabel("Dream Square"); Spacer(); Button { following.toggle() } label: { Text(following ? "Following ✓" : "Following").communityPill() }.frame(minHeight:44) }
             }
         }
     }
@@ -196,14 +227,19 @@ private struct CommunityListing: View {
 
     private func activityRow(_ row: CommunityRow) -> some View {
         let source = row["entries"] as? CommunityRow ?? [:]
-        return Button { app.go(source.communityString("kind") == "dream" ? "dreams.detail" : "feed.post", row.communityString("entry_id")) } label: {
-            VStack(alignment: .leading, spacing: 5) {
-                Text(profiles[row.communityString("owner_id")]?.communityString("name") ?? "Night listener").bold()
-                Text(timestamp(row.communityString("created_at"))).font(.caption)
-                Text(likes ? "Liked your " + source.communityString("kind") : row.communityString("body"))
-                Text(source.communityString("caption").isEmpty ? "View original ›" : source.communityString("caption") + " ›").font(.callout)
-            }.communityCard()
-        }.buttonStyle(.plain)
+        return VStack(alignment: .leading, spacing: 10) {
+            CommunityOwner(row: row,profile: profiles[row.communityString("owner_id")] ?? [:])
+            Text(likes ? "Liked your " + source.communityString("kind") : row.communityString("body"))
+                .font(.subheadline)
+            Button { app.go(source.communityString("kind") == "dream" ? "dreams.detail" : "feed.post", row.communityString("entry_id")) } label: {
+                HStack {
+                    Text(source.communityString("caption").isEmpty ? "View original" : source.communityString("caption"))
+                        .lineLimit(3).multilineTextAlignment(.leading)
+                    Spacer()
+                    NativeArt("activity",3).scaledToFit().frame(width:38,height:17)
+                }.font(.footnote).padding(10).frame(minHeight:74).background(Color.gray.opacity(0.1),in: RoundedRectangle(cornerRadius:10))
+            }.buttonStyle(.plain).accessibilityLabel("View original")
+        }.communityCard()
     }
 
     private func reading(_ i: Int) -> some View {
@@ -212,17 +248,20 @@ private struct CommunityListing: View {
             HStack { NativeArt("icon", 1).scaledToFill().frame(width: 42, height: 42).clipShape(Circle()); VStack(alignment: .leading) { Text("MiNa Journal").bold(); Text("Bedtime reading").font(.caption) } }
             Text(story.2)
             Button { if name != "feed.read" { app.go("feed.read", story.0) } } label: {
-                ZStack(alignment: .bottomLeading) {
-                    nativeArtwork("rooms-extra",story.4).scaledToFill()
-                    Text(story.1).font(.headline).padding(9).background(.ultraThinMaterial, in: Capsule()).padding()
-                }.frame(maxWidth: .infinity).frame(height: 148).clipped().cornerRadius(16)
+                Color.clear.frame(maxWidth: .infinity).frame(height: 220)
+                    .overlay { nativeArtwork("rooms-extra",story.4).scaledToFill() }
+                    .clipShape(RoundedRectangle(cornerRadius:16))
+                    .overlay(alignment:.bottomLeading) {
+                        Text(story.1).font(.headline).padding(9).background(.ultraThinMaterial,in:Capsule()).padding()
+                    }
+                    .contentShape(RoundedRectangle(cornerRadius:16))
             }.buttonStyle(.plain)
             if name == "feed.read" { Text(story.3) }
-        }.communityCard()
+        }.padding(.vertical,8).overlay(alignment: .bottom) { Divider() }
     }
 
     @ViewBuilder private var discussion: some View {
-        Text("Discussion").font(.title2.bold())
+        Text("Discussion").font(.headline.bold())
         if comments.isEmpty { Text("No comments yet.") }
         ForEach(comments.indices, id: \.self) { i in
             let note = comments[i]
@@ -231,6 +270,9 @@ private struct CommunityListing: View {
                 Text(note.communityString("body"))
             }.communityCard()
         }
+    }
+
+    @ViewBuilder private var commentInput: some View {
         HStack {
             Button { emoji.toggle() } label: { NativeArt("post",10).scaledToFit().frame(width: 24,height: 24).frame(width: 44,height: 44) }.accessibilityLabel("Choose an emoji")
             TextField("Write a comment…", text: $text).focused($editingComment).onChange(of: text) { value in
@@ -247,12 +289,22 @@ private struct CommunityListing: View {
                     } catch { message = error.localizedDescription }
                 }
             } label: { NativeArt("post",11).scaledToFit().frame(width: 24,height: 24).frame(width: 44,height: 44) }.accessibilityLabel("Send comment").disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-        }.disabled(sending).communityCard()
+        }.disabled(sending).padding(.horizontal,8).background(.white,in: Capsule())
         if emoji { HStack { ForEach(["🌙","✨","💚","😴","🌟","🫶"], id: \.self) { item in Button(item) { text += item } } } }
     }
 }
 
+let communityGradient = LinearGradient(colors: [Color(red:0.02,green:0.91,blue:0.61), Color(red:0.40,green:0.66,blue:1.0)], startPoint:.leading,endPoint:.trailing)
+
 extension View {
+    func communityPill() -> some View {
+        font(.subheadline.weight(.semibold)).foregroundStyle(Color.black.opacity(0.8))
+            .padding(.horizontal,15).padding(.vertical,5).background(communityGradient,in: Capsule())
+    }
+    func communityPrimary() -> some View {
+        font(.headline).foregroundStyle(Color(red:0.02,green:0.22,blue:0.22))
+            .frame(maxWidth:.infinity).frame(minHeight:58).background(communityGradient,in: Capsule())
+    }
     func communityCard() -> some View { padding().frame(maxWidth: .infinity, alignment: .leading).background(Color.white.opacity(0.94), in: RoundedRectangle(cornerRadius: 20)) }
 }
 
@@ -286,11 +338,13 @@ private struct CommunityEntry: View {
     let profile: CommunityRow
     let followed: Bool
     let detail: Bool
+    let mine: Bool
     let update: () -> Void
     let issue: (String) -> Void
     let focus: () -> Void
     @State private var busy = false
     @State private var confirm = ""
+    @State private var options = false
     @State private var reporting = false
     @State private var reason = "Harassment"
     @State private var context = ""
@@ -315,20 +369,29 @@ private struct CommunityEntry: View {
             else { _ = try await app.api.rest("entry_reactions", method: "POST", body: ["entry_id":id,"owner_id":me,"kind":reaction], prefer: "resolution=ignore-duplicates") }
         }
     }
+    private var caption: String {
+        row.communityString("caption").isEmpty ? (dream ? "A voice from the night" : "A moment from my night") : row.communityString("caption")
+    }
+    private var entryMedia: some View {
+        CommunityMedia(path: row.communityString("media_path"),duration: row.communitySeconds("duration"),voice: dream,remote: true,videoHeight: detail ? 338 : 220)
+    }
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
+            if detail && !dream { entryMedia }
             HStack {
                 CommunityOwner(row: row, profile: profile)
                 Spacer()
                 if owner != me {
-                    Button(followed ? "Following" : "Follow") { run {
+                    Button { run {
                         if followed { _ = try await app.api.rest("follows?follower_id=eq." + me + "&followed_id=eq." + owner, method: "DELETE") }
                         else { _ = try await app.api.rest("follows", method: "POST", body: ["follower_id":me,"followed_id":owner], prefer: "resolution=ignore-duplicates") }
-                    } }.buttonStyle(.bordered)
+                    } } label: { Text(followed ? "Following" : "Follow").communityPill() }.frame(minHeight:44)
+                } else if mine {
+                    Button { confirm = "Delete" } label: { Text("Delete").communityPill() }.frame(minHeight:44)
                 }
             }
-            Button { open() } label: { Text(row.communityString("caption").isEmpty ? (dream ? "A voice from the night" : "A moment from my night") : row.communityString("caption")) }.buttonStyle(.plain)
-            CommunityMedia(path: row.communityString("media_path"), duration: row.communitySeconds("duration"), voice: dream, remote: true)
+            Button { open() } label: { Text(caption).font(.body).multilineTextAlignment(.leading) }.buttonStyle(.plain)
+            if !detail || dream { entryMedia }
             HStack {
                 let liked = row["liked"] as? Bool ?? false
                 let saved = row["saved"] as? Bool ?? false
@@ -336,16 +399,18 @@ private struct CommunityEntry: View {
                 if dream { Button { toggle("save", saved) } label: { actionIcon("dreams",saved ? 9 : 8, saved ? "Saved" : "Save") } }
                 else { Button { if detail { focus() } else { open() } } label: { actionIcon("feed",7,String(Int(row.communitySeconds("comment_count")))) }.accessibilityLabel("Open discussion") }
                 Spacer()
-                Menu {
+                Button { options = true } label: { NativeArt("feed",8).scaledToFit().frame(width: 22,height: 22).frame(width: 44,height: 44) }.accessibilityLabel("More options")
+                .confirmationDialog("Entry options", isPresented: $options, titleVisibility: .hidden) {
                     if owner == me { Button("Delete " + kind, role: .destructive) { confirm = "Delete" } }
                     else {
                         Button("Report " + kind) { reporting = true }
                         Button("View author profile") { app.go("person",owner) }
                         Button("Block author", role: .destructive) { confirm = "Block" }
                     }
-                } label: { NativeArt("feed",8).scaledToFit().frame(width: 22,height: 22).frame(width: 44,height: 44) }.accessibilityLabel("More options")
+                    Button("Cancel", role: .cancel) {}
+                }
             }.disabled(busy)
-        }.communityCard()
+        }.padding(.vertical,6).overlay(alignment: .bottom) { Divider() }
         .confirmationDialog(confirm == "Block" ? "Block this author?" : "Delete this " + kind + "?", isPresented: Binding(get: { !confirm.isEmpty }, set: { if !$0 { confirm = "" } }), titleVisibility: .visible) {
             if confirm == "Block" {
                 Button("Block author", role: .destructive) { run { _ = try await app.api.rest("blocks", method: "POST", body: ["owner_id":me,"blocked_id":owner], prefer: "resolution=ignore-duplicates") } }
@@ -374,7 +439,7 @@ private struct CommunityEntry: View {
                     }
                 }.buttonStyle(.borderedProminent)
                 Button("Cancel") { reporting = false }
-            }.padding().disabled(busy).presentationDetents([.medium])
+            }.padding(22).frame(maxWidth:.infinity,maxHeight:.infinity,alignment:.topLeading).background { NativeArt("activity",1).ignoresSafeArea() }.disabled(busy).presentationDetents([.medium,.large])
         }
     }
     private func actionIcon(_ group: String, _ index: Int, _ text: String) -> some View {

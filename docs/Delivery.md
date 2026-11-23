@@ -15,6 +15,10 @@
 
 The native target uses SwiftUI, Foundation Models where available, AVFoundation and WebRTC. Artwork, soundscapes and policy text are packaged as native resources. All 22 Swift files passed syntax parsing and are included in the application target. All 508 migrated artwork and audio files match the previous resource bytes. The policy text also matches. Xcode resolved the pinned WebRTC 137.0.0 package. The project contains no page-packaging build phase. On November 23, 2026, Xcode 26.3 built the current Debug scheme from `ios/MiNa.xcodeproj` for the newly created MiNa QA simulator (iPhone 17 Pro, iOS 26.3, UDID `DBFA7AD1-FB00-4FB8-8287-D8E72FE9594E`). The first compilation identified the WebRTC transceiver setter's explicit error argument. After correcting that call, the build succeeded with AVFoundation deprecation warnings. The resulting app was installed and launched on that same device. A screenshot confirmed the native welcome screen, consent switch and Continue button. The screenshot is in `build/MiNaQA/MiNa-QA-launch.png`. Upgrade, sign-in, payments and two-device audio were outside this launch check.
 
+## Rooms home visual verification
+
+The updated Debug build was installed and launched on MiNa QA (iPhone 17 Pro, iOS 26.3). Its signed-in Rooms home was compared with the supplied home board. The full Dream Space banner, two featured covers, Recommended rows, ranking control and floating microphone fit within the screen margins. Available bundled sounds are identified as offline and show their audio duration. Live-room cards use service data. The actual device screenshot and side-by-side comparison are in `build/MiNaQA/MiNa-QA-Rooms.png` and `build/MiNaQA/Rooms-design-comparison.png`.
+
 ## Historical verification with the previous host
 
 The Release build succeeded for an iPhone 17 Pro simulator on iOS 26.0 using Xcode 26.0.1. The installed app reports UIDeviceFamily 1. The bundled RN host and local H5 archive were present. Native extraction completed on launch and all 511 extracted resources matched the SHA-256 manifest.
