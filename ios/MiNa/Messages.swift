@@ -66,8 +66,6 @@ struct MessagesScreen: View {
             if route.name == "messages.call" { VoiceCallScreen(id: route.id ?? "") }
             else { MessageListScreen(route: route) }
         }.id(route.name + (route.id ?? ""))
-        .environment(\.colorScheme, .light)
-        .preferredColorScheme(route.name == "messages" ? .dark : .light)
     }
 }
 
@@ -226,11 +224,23 @@ private struct MessageListScreen: View {
             Button { app.go("messages.thread",row.id) } label: {
                 HStack { InboxAvatar(person: people[row.id]); VStack(alignment: .leading) {
                     Text(people[row.id]?.string("name") ?? "Listener").bold()
-                    Text(row.roomID == nil ? row.string("body") : "Voice room invitation").lineLimit(1).foregroundStyle(.secondary)
+                    Text(row.roomID == nil ? row.string("body") : "Voice room invitation").font(ReactionPicker.textFont(for: row.string("body"))).lineLimit(1).foregroundStyle(.secondary)
                 }; Spacer(); VStack(alignment: .trailing) { Text(row.timestamp).font(.caption2); badge(row.count("unread")) } }.messageCard()
             }.swipeActions { Button("Clear", role: .destructive) { clear = row } }
         }
-        if loaded && filtered.isEmpty { emptyMessage(query.isEmpty ? "No conversations yet." : "No matching conversations.") }
+        if loaded && filtered.isEmpty {
+            if query.isEmpty {
+                VStack(spacing: 8) {
+                    Text("No conversations yet.").font(.headline)
+                    Text("Find a listener by nickname to start a chat.").font(.subheadline).foregroundStyle(.secondary)
+                    Button("Find people") { app.go("profile.search") }
+                        .font(.subheadline.weight(.semibold)).padding(.horizontal, 20).frame(minHeight: 44)
+                        .background(.mint.opacity(0.25), in: Capsule())
+                }.frame(maxWidth: .infinity).padding(.vertical, 16)
+            } else {
+                emptyMessage("No matching conversations.")
+            }
+        }
     }
 
     @ViewBuilder func badge(_ count: Int) -> some View {
@@ -291,6 +301,11 @@ private struct MessageListScreen: View {
                 Button { app.go("person", peer) } label: { InboxAvatar(person: person, size: 102) }.accessibilityLabel("View profile")
                 Button { confirmCall = true } label: { NativeArt("chat", 4).scaledToFit().frame(width: 74, height: 38) }
                     .disabled(!person.flag("allow_calls") || busy).accessibilityLabel("Voice call")
+                if !person.flag("allow_messages") || !person.flag("allow_calls") {
+                    let unavailable = person.flag("allow_messages") ? "voice calls" : person.flag("allow_calls") ? "private messages" : "private messages and voice calls"
+                    Text("This listener has turned off \(unavailable).")
+                        .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                }
             }.frame(maxWidth: .infinity)
         }
         if rows.count >= take { Button("Load earlier messages") { take += 50; Task { await refresh() } } }
@@ -300,22 +315,22 @@ private struct MessageListScreen: View {
                 if own { Spacer(minLength: 36) }
                 VStack(alignment: own ? .trailing : .leading) {
                     if let room = row.roomID { Button("Open voice room invitation") { app.go("rooms.live",room) } }
-                    else { Text(row.string("body")).textSelection(.enabled) }
+                    else { Text(row.string("body")).font(ReactionPicker.textFont(for: row.string("body"))).textSelection(.enabled) }
                     Text(row.timestamp).font(.caption2).foregroundStyle(.secondary)
                 }.padding(10).background(own ? Color(red: 0.42, green: 0.87, blue: 0.8) : Color.white.opacity(0.92),in: RoundedRectangle(cornerRadius: 15))
                 if !own { Spacer(minLength: 36) }
             }.listRowBackground(Color.clear).listRowSeparator(.hidden)
             .onAppear { if row.id == rows.first?.id && row.id != lastRead { Task { do { try await mark(peer,row.id); lastRead = row.id } catch { self.error = error.localizedDescription } } } }
         }
-        if loaded && rows.isEmpty { emptyMessage("Start a conversation.") }
+        if loaded && rows.isEmpty && people[peer]?.flag("allow_messages") == true { emptyMessage("Start a conversation.") }
     }
 
     var composer: some View {
         VStack {
-            if showEmoji { HStack { ForEach(["🌙","✨","💚","😴","🌟","🫶"], id: \.self) { emoji in Button(emoji) { edit(draft + emoji) } } } }
+            if showEmoji { ReactionPicker { edit(draft + $0) } }
             HStack {
                 Button { showEmoji.toggle() } label: { NativeArt("chat",5).frame(width: 32,height: 32) }.accessibilityLabel("Choose an emoji")
-                TextField("Message…",text: Binding(get: { draft }, set: edit))
+                TextField("Message…",text: Binding(get: { draft }, set: edit)).font(ReactionPicker.textFont(for: draft))
                 Button { operate { try await send() } } label: { NativeArt("chat",6).scaledToFit().frame(width: 64,height: 45) }
                     .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).accessibilityLabel("Send message")
             }.padding(.horizontal, 8).background(.white, in: Capsule())
@@ -405,6 +420,7 @@ private struct MessageListScreen: View {
                 }
                 try Task.checkCancellation()
                 rows = values.map(InboxRow.init(values:)); loaded = true; error = ""
+                if inbox { app.didRefreshRoot("messages") }
             } catch { if !Task.isCancelled { self.error = error.localizedDescription } }
         } while refreshPending && !Task.isCancelled
     }

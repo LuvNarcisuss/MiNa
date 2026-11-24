@@ -2,6 +2,14 @@ import Foundation
 import SwiftUI
 import AVFoundation
 
+struct RoomParticipant: Identifiable {
+    let id: String
+    let name: String
+    let portrait: URL?
+    let present: Bool
+    let role: String
+}
+
 @MainActor final class NativeRoomSession: ObservableObject {
     @Published var room: RoomRow?
     @Published var members: [RoomRow] = []
@@ -37,6 +45,30 @@ import AVFoundation
     }
     private var peers: [String:Peer] = [:]
     func name(_ who: String) -> String { profiles[who] ?? (who == me ? "You" : "Listener") }
+    var participants: [RoomParticipant] {
+        var seen = Set<String>()
+        var people: [RoomParticipant] = []
+        func append(_ uid: String, present: Bool, role: String) {
+            guard !uid.isEmpty, seen.insert(uid).inserted else { return }
+            people.append(RoomParticipant(id: uid, name: name(uid), portrait: pictures[uid], present: present, role: role))
+        }
+        for member in members {
+            let seat = member["seat"] as? Int
+            append(member.roomText("user_id"), present: true, role: seat.map { $0 == 0 ? "Host" : "Mic \($0)" } ?? "Listening")
+        }
+        for message in messages.reversed() {
+            append(message.roomText("owner_id"), present: false, role: "Chatted earlier")
+        }
+        return people
+    }
+
+    func isCurrentMessage(_ row: RoomRow) -> Bool {
+        guard active, let sent = roomDate(row.roomText("created_at")),
+              let entry = roomDate(joined), sent >= entry,
+              let author = members.first(where: { $0.roomText("user_id") == row.roomText("owner_id") }),
+              let arrival = roomDate(author.roomText("joined_at")) else { return false }
+        return sent >= arrival
+    }
     func memberFilter(_ id: String,_ user: String) -> String { "room_id=eq." + id + "&user_id=eq." + user }
     private func membership(_ id: String,_ stamp: String) -> String { "room_members?" + memberFilter(id,me) + "&joined_at=eq." + roomFilter(stamp) }
     private func disconnect() {
@@ -91,7 +123,7 @@ import AVFoundation
                     lastBeat = Date()
                 }
                 async let roster = api.rows("room_members?" + filter + "&last_seen=gte." + roomFilter(roomStamp(Date().addingTimeInterval(-60))) + "&order=joined_at.asc")
-                async let chat = api.rows("room_messages?" + filter + "&order=created_at.desc&limit=45")
+                async let chat = api.rows("room_messages?" + filter + "&order=created_at.desc,id.desc&limit=45")
                 async let queue = api.rows("room_seat_requests?" + filter + "&order=created_at.asc")
                 async let signals = api.rows("room_signals?" + filter + "&recipient_id=eq." + me + "&id=gt.\(cursor)&created_at=gte." + roomFilter(joined) + "&order=id.asc&limit=100")
                 let (present,history,waiting,incoming) = try await (roster,chat,queue,signals)
@@ -117,9 +149,9 @@ import AVFoundation
                             let list = try await api.rows("profiles?select=id,name,avatar_path&id=in.(" + ids.joined(separator: ",") + ")")
                             try check(generation)
                             for key in ids where profiles[key] == nil { profiles[key] = "Listener" }
+                            for p in list { profiles[p.roomText("id")] = p.roomText("name") }
                             for p in list {
                                 let key = p.roomText("id"), path = p.roomText("avatar_path")
-                                profiles[key] = p.roomText("name")
                                 if !path.isEmpty {
                                     let image = try? await api.mediaURL(path)
                                     try check(generation)

@@ -14,6 +14,7 @@ struct CommunityComposer: View {
     @State private var seconds = 0.0
     @State private var recoveryNeeded = false
     @State private var visible = false
+    @State private var published = false
     private var isRecorder: Bool { route.name == "dreams.record" }
     private var dream: Bool { route.name.hasPrefix("dreams") }
     private var key: String { dream ? "dreamDraft" : "postDraft" }
@@ -41,10 +42,23 @@ struct CommunityComposer: View {
             visible = true
             account = app.api.userID
             draft = journal[key] as? CommunityRow ?? ["id":UUID().uuidString.lowercased(),"text":""]
+            published = false
             if isRecorder { recover() }
+            else if let media {
+                perform {
+                    if try app.media.storedAsset(media.communityString("id")) == nil {
+                        var next = draft
+                        next.removeValue(forKey: "media")
+                        next["id"] = UUID().uuidString.lowercased()
+                        try save(next)
+                        message = dream ? "This recording is no longer on this iPhone. Record a new take to publish." : "This video is no longer on this iPhone. Choose a video to publish."
+                    }
+                }
+            }
         }
         .onDisappear {
             visible = false
+            if isRecorder { app.media.cancelPendingRecording() }
             if recording { perform { try finish() } }
         }
         .task(id: recording) {
@@ -89,7 +103,8 @@ struct CommunityComposer: View {
                             }.frame(maxWidth:.infinity,maxHeight:.infinity)
                         }
                     }
-                }.frame(maxWidth:265).frame(height:260).background(.white,in: RoundedRectangle(cornerRadius:14)).frame(maxWidth:.infinity)
+                }.aspectRatio(16.0 / 9.0, contentMode: .fit).frame(maxWidth: .infinity)
+                .background(.white, in: RoundedRectangle(cornerRadius: 20))
                 caption
             }
             Button { work { try await publish() } } label: {
@@ -101,6 +116,7 @@ struct CommunityComposer: View {
         VStack(alignment: .leading,spacing:8) {
             if !dream { Text("Tonight’s mood").font(.subheadline.weight(.medium)).foregroundStyle(.secondary) }
             TextField(dream ? "What do you remember from your dream?" : "What would you like to remember?", text: Binding(get: { draft.communityString("text") }, set: { value in
+                guard visible, !published, !busy, value != draft.communityString("text") else { return }
                 perform { var next = draft; next["text"] = String(value.prefix(2000)); try save(next) }
             }), axis: .vertical).font(.body).lineLimit(3...8)
                 .padding(14).frame(maxWidth:.infinity,alignment:.leading).frame(minHeight:dream ? 164 : 214,alignment:.top)
@@ -205,6 +221,8 @@ struct CommunityComposer: View {
         if (latest[key] as? CommunityRow)?.communityString("id") == id {
             latest.removeValue(forKey: key); try app.save(journalKey,latest); clean(take); clean(candidate)
         }
+        published = true
+        draft = [:]
         if visible, app.route == route {
             let destination = NativeRoute(name: dream ? "dreams.mine" : "feed.mine")
             var path = app.path

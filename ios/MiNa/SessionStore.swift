@@ -2,14 +2,19 @@ import Foundation
 import Security
 
 enum SessionStore {
-    private static var query: [String: Any] {
-        [kSecClass as String: kSecClassGenericPassword,
-         kSecAttrService as String: (Bundle.main.bundleIdentifier ?? "MiNa") + ".session",
-         kSecAttrAccount as String: "supabase"]
+    enum Slot: String {
+        case legacy = "supabase"
+        case password = "supabase.email"
     }
 
-    static func read() throws -> [String: Any]? {
-        var request = query
+    private static func query(_ slot: Slot) -> [String: Any] {
+        [kSecClass as String: kSecClassGenericPassword,
+         kSecAttrService as String: (Bundle.main.bundleIdentifier ?? "MiNa") + ".session",
+         kSecAttrAccount as String: slot.rawValue]
+    }
+
+    static func read(_ slot: Slot) throws -> [String: Any]? {
+        var request = query(slot)
         request[kSecReturnData as String] = true
         request[kSecMatchLimit as String] = kSecMatchLimitOne
         var item: CFTypeRef?
@@ -29,7 +34,8 @@ enum SessionStore {
         return uuid.uuidString
     }
 
-    static func write(_ session: [String: Any]?) throws {
+    static func write(_ session: [String: Any]?, to slot: Slot) throws {
+        let query = Self.query(slot)
         guard let session else {
             let status = SecItemDelete(query as CFDictionary)
             guard [errSecSuccess, errSecItemNotFound].contains(status) else { throw MiNaIssue("Sign-out could not be saved.") }

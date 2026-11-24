@@ -13,6 +13,9 @@ struct RoomLiveView: View {
     let id: String
     @StateObject private var session = NativeRoomSession()
     @StateObject private var player = RoomPlayer()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var previewOffset = 0
+    @State private var moderation: RoomModerationTarget?
     @State private var panel: RoomPanel?
     @State private var seat = 1
     @State private var listenerID = ""
@@ -34,13 +37,8 @@ struct RoomLiveView: View {
                 let members = session.members.filter { $0["seat"] is Int }
                 let seats = members.reduce(into: [Int:String]()) { result,row in if let n = row["seat"] as? Int { result[n] = session.name(row.roomText("user_id")) } }
                 let portraits = members.reduce(into: [Int:URL]()) { result,row in if let n = row["seat"] as? Int { result[n] = session.pictures[row.roomText("user_id")] } }
-                RoomStageFrame(title: room.roomText("title"),topic: room.roomText("topic"),cover: room.roomText("cover"),host: session.name(hostID),hostStatus: seats[0] == nil ? "Host away" : "Host",audience: session.active ? session.members.count : nil,runtime: max(0,Int(-(roomDate(room.roomText("created_at")) ?? Date()).timeIntervalSinceNow / 60)),seats: seats,portraits: portraits,gifts: room.roomFlag("allow_gifts") && session.active,open: { next,n in seat = n; listenerID = ""; panel = next }) {
-                    VStack(alignment: .leading,spacing: 10) {
-                        Text(session.active ? (session.connections > 0 ? "Voice connected · \(session.connections) peers" : "In room · No voice connection yet") : session.status)
-                        Text("Microphone: " + session.mic).font(.caption)
-                        ForEach(Array(session.messages.suffix(3).enumerated()),id: \.offset) { _,row in Text(chatText(row)).font(.subheadline) }
-                        if !session.notice.isEmpty { Text(session.notice).font(.caption) }
-                    }.frame(maxWidth: .infinity,alignment: .leading).padding().background(.black.opacity(0.35),in: RoundedRectangle(cornerRadius: 16))
+                RoomStageFrame(title: room.roomText("title"),topic: room.roomText("topic"),cover: room.roomText("cover"),host: session.name(hostID),hostStatus: seats[0] == nil ? "Host away" : "Host",audience: session.active ? session.members.count : nil,runtime: max(0,Int(-(roomDate(room.roomText("created_at")) ?? Date()).timeIntervalSinceNow / 60)),seats: seats,hostPortrait: session.pictures[hostID],portraits: portraits,safetyMenu: AnyView(safetyMenu),participants: session.participants,selectParticipant: showListener,open: { next,n in seat = n; listenerID = ""; panel = next }) {
+                    stageChat
                 }
             } else { VStack(spacing: 16) { Text(session.status); if session.status == "Reconnecting…" { Button("Retry") { session.leave(app.api,id); retry += 1 } }; Button("Back to rooms") { app.go("rooms") } } }
         }
@@ -80,11 +78,104 @@ struct RoomLiveView: View {
                     }
                 }
         }
+        .sheet(item: $moderation) { target in
+            RoomModerationForm(target: target) { message in
+                moderation = nil
+                if target.block || target.kind == "room" {
+                    session.leave(app.api, id)
+                    if !target.block { app.safetyChanged(); app.back(); app.safetyNotice = message }
+                } else {
+                    panel = nil
+                    session.notice = message
+                }
+            }
+        }
     }
+    private var safetyMenu: some View {
+        Menu {
+            Button("Report room") { moderation = .init(uid: id, name: session.room?.roomText("title") ?? "Room", kind: "room") }
+            if hostID != me && !hostID.isEmpty { personActions(hostID, label: "host") }
+        } label: {
+            Label("Report / Block", systemImage: "shield").font(.caption.bold())
+                .padding(.horizontal, 8).padding(.vertical, 5).background(.white.opacity(0.16), in: Capsule())
+                .frame(minHeight: 44)
+        }.accessibilityLabel("Report or block")
+    }
+
+    @ViewBuilder private func personActions(_ uid: String, label: String) -> some View {
+        Button("Report " + label) { moderation = .init(uid: uid, name: session.name(uid), kind: "profile") }
+        Button("Block " + label, role: .destructive) { moderation = .init(uid: uid, name: session.name(uid), kind: "profile", block: true) }
+    }
+
+    private var stageChat: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(session.active ? (session.connections > 0 ? "Voice connected" : "Listening") : session.status)
+                Spacer()
+                Text("Mic " + session.mic.lowercased())
+            }.font(.caption).lineLimit(1)
+            let recent = Array(session.messages.suffix(5).reversed())
+            if recent.isEmpty {
+                Text(session.active ? "No room messages yet." : "Loading room chat…").font(.subheadline)
+            } else {
+                let row = recent[previewOffset % recent.count]
+                let uid = row.roomText("owner_id")
+                Button { showListener(uid) } label: {
+                    HStack(spacing: 8) {
+                        memberPortrait(uid, size: 32)
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 6) {
+                                Text(session.name(uid)).bold()
+                                if !session.isCurrentMessage(row) { Text("Earlier").foregroundStyle(.white.opacity(0.8)) }
+                            }.font(.caption)
+                            Text(chatText(row)).font(.subheadline).lineLimit(2).multilineTextAlignment(.leading)
+                        }
+                    }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                }.buttonStyle(.plain).id(row.roomMessageID)
+                    .transition(reduceMotion ? .identity : .asymmetric(insertion: .move(edge: .trailing).combined(with: .opacity), removal: .opacity))
+            }
+            if !session.notice.isEmpty { Text(session.notice).font(.caption).lineLimit(1) }
+        }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
+            .background(.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 12))
+            .clipped()
+            .task(id: session.messages.last?.roomMessageID) {
+                previewOffset = 0
+                while session.messages.count > 1 {
+                    do { try await Task.sleep(nanoseconds: 5_000_000_000) } catch { return }
+                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.35)) { previewOffset += 1 }
+                }
+            }
+    }
+
+    private func showListener(_ uid: String) {
+        listenerID = uid
+        panel = .listener
+    }
+
+    private func messageLine(_ row: RoomRow) -> some View {
+        let uid = row.roomText("owner_id")
+        return Button { showListener(uid) } label: {
+            HStack(alignment: .top, spacing: 8) {
+                memberPortrait(uid, size: 30)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack {
+                        Text(session.name(uid)).font(.subheadline.bold())
+                        Spacer()
+                        if let sent = roomDate(row.roomText("created_at")) {
+                            Text(sent, style: .relative).font(.caption2)
+                        }
+                    }
+                    if !session.isCurrentMessage(row) { Text("Earlier in this room").font(.caption2) }
+                    Text(chatText(row)).font(.subheadline).multilineTextAlignment(.leading)
+                }
+            }.contentShape(Rectangle())
+        }.buttonStyle(.plain)
+    }
+
     func chatText(_ row: RoomRow) -> String {
         let text = row.roomText("body")
         let sound = RoomSound.all.first { "mina:music:" + $0.id == text }
-        return session.name(row.roomText("owner_id")) + ": " + (sound.map { "Requested “" + $0.title + "”." } ?? text)
+        return sound.map { "Requested “" + $0.title + "”." } ?? text
     }
     func act(_ action: @escaping @MainActor () async throws -> Void) {
         guard !busy else { return }; busy = true; session.notice = ""
@@ -107,6 +198,7 @@ struct RoomLiveView: View {
                 VStack(alignment: .leading) { Text(session.name(hostID)).bold(); Text("Room host").font(.caption) }
             }
             VStack(alignment: .leading,spacing: 8) { Text(session.room?.roomText("title") ?? "Room").bold(); Text(session.room?.roomText("topic") ?? ""); Text("Audience: \(session.members.count)") }.frame(maxWidth: .infinity,alignment: .leading).padding().background(.white.opacity(0.85),in: RoundedRectangle(cornerRadius: 14))
+            if !session.host { personActions(hostID, label: "host") }
             Button("View host profile") { panel = nil; app.go(session.host ? "profile" : "person",hostID) }.buttonStyle(RoomCapsuleStyle())
             if !session.host,session.room?.roomFlag("allow_follow") == true {
                 Button(followed == true ? "Unfollow host" : "Follow host") { act {
@@ -119,22 +211,29 @@ struct RoomLiveView: View {
                 } }.disabled(busy)
             }
         case .audience:
-            ForEach(Array(session.members.enumerated()),id: \.offset) { _,m in
-                let who = m.roomText("user_id")
-                Button { listenerID = who; panel = .listener } label: {
-                    HStack(spacing: 9) {
-                        memberPortrait(who); VStack(alignment: .leading) { Text(session.name(who)).bold(); Text((m["seat"] as? Int).map { $0 == 0 ? "Host" : "Mic \($0)" } ?? "Listening").font(.caption) }; Spacer(); Text("›")
-                    }.padding(10).background(.white.opacity(0.86),in: RoundedRectangle(cornerRadius: 13))
-                }.buttonStyle(.plain)
-                if session.host && who != me && m["seat"] is Int {
-                    Button("Remove from mic") { act { try await updateMember(who,["seat":NSNull()]) } }.disabled(busy)
+            ForEach([true, false], id: \.self) { present in
+                let people = session.participants.filter { $0.present == present }
+                if !people.isEmpty { Text(present ? "Here now" : "Earlier contributors").font(.headline) }
+                ForEach(people) { person in
+                    Button { showListener(person.id) } label: {
+                        HStack(spacing: 9) {
+                            memberPortrait(person.id)
+                            VStack(alignment: .leading) { Text(person.name).bold(); Text(person.role).font(.caption) }
+                            Spacer(); Text("›")
+                        }.padding(10).background(.white.opacity(0.86), in: RoundedRectangle(cornerRadius: 13))
+                    }.buttonStyle(.plain)
+                    if present, session.host, person.id != me,
+                       session.members.contains(where: { $0.roomText("user_id") == person.id && $0["seat"] is Int }) {
+                        Button("Remove from mic") { act { try await updateMember(person.id, ["seat": NSNull()]) } }.disabled(busy)
+                    }
                 }
             }
         case .listener:
             HStack { memberPortrait(listenerID); Text(session.name(listenerID)).font(.headline) }
-            Text(session.members.contains(where: { $0.roomText("user_id") == listenerID }) ? "In this room" : "Left the room")
+            Text(session.members.contains(where: { $0.roomText("user_id") == listenerID }) ? "In this room" : "Earlier contributor")
+            if listenerID != me { personActions(listenerID, label: "listener") }
             Button("View profile") { panel = nil; app.go(listenerID == me ? "profile" : "person",listenerID) }.buttonStyle(RoomCapsuleStyle())
-            if listenerID != me, session.room?.roomFlag("allow_gifts") == true {
+            if listenerID != me, session.members.contains(where: { $0.roomText("user_id") == listenerID }), session.room?.roomFlag("allow_gifts") == true {
                 Button("Choose a gift") { panel = .gift }.buttonStyle(RoomCapsuleStyle())
             }
         case .mic: seatControls
@@ -156,7 +255,7 @@ struct RoomLiveView: View {
             }
             if !player.error.isEmpty { Text(player.error) }
         case .chat:
-            ForEach(Array(session.messages.enumerated()),id: \.offset) { _,row in Text(chatText(row)) }
+            ForEach(session.messages, id: \.roomMessageID) { row in messageLine(row) }
             if session.messages.isEmpty { Text("No room messages yet.") }
             if session.room?.roomFlag("allow_comments") == true {
                 TextField("Say hello…",text: $message).onChange(of: message) { message = String($0.prefix(1200)) }
@@ -175,10 +274,10 @@ struct RoomLiveView: View {
         default: EmptyView()
         }
     }
-    @ViewBuilder private func memberPortrait(_ uid: String) -> some View {
+    @ViewBuilder private func memberPortrait(_ uid: String, size: CGFloat = 44) -> some View {
         if let url = session.pictures[uid] {
-            AsyncImage(url: url) { image in image.resizable().scaledToFill() } placeholder: { Color.teal.opacity(0.15) }.frame(width: 44,height: 44).clipShape(Circle())
-        } else { Text(String(session.name(uid).prefix(2))).bold().frame(width: 44,height: 44).background(Color.teal.opacity(0.15),in: Circle()) }
+            AsyncImage(url: url) { image in image.resizable().scaledToFill() } placeholder: { Color.teal.opacity(0.15) }.frame(width: size,height: size).clipShape(Circle())
+        } else { Text(String(session.name(uid).prefix(2))).bold().frame(width: size,height: size).background(Color.teal.opacity(0.15),in: Circle()) }
     }
     func updateMember(_ uid: String,_ body: RoomRow) async throws {
         let result = try await app.api.rest("room_members?" + session.memberFilter(id,uid),method: "PATCH",body: body,prefer: "return=representation") as? [RoomRow]
@@ -216,5 +315,69 @@ struct RoomLiveView: View {
                 }
             }
         }
+    }
+}
+
+private extension Dictionary where Key == String, Value == Any {
+    var roomMessageID: String { roomText("id") }
+}
+
+private struct RoomModerationTarget: Identifiable {
+    let id = UUID()
+    let uid: String
+    let name: String
+    let kind: String
+    var block = false
+}
+
+private struct RoomModerationForm: View {
+    @EnvironmentObject private var app: MiNaAppModel
+    @Environment(\.dismiss) private var dismiss
+    let target: RoomModerationTarget
+    let completed: (String) -> Void
+    @State private var reason = "Harassment"
+    @State private var details = ""
+    @State private var busy = false
+    @State private var error = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text(target.name).bold()
+                    if target.block {
+                        Text("Their messages will be hidden. You can unblock this person in your profile settings.")
+                    } else {
+                        Picker("Reason", selection: $reason) {
+                            ForEach(["Harassment", "Sexual content", "Harmful content", "Privacy concern", "Spam", "Other"], id: \.self) { Text($0) }
+                        }
+                        TextField("Additional details (optional)", text: $details, axis: .vertical)
+                    }
+                }
+                Button(target.block ? "Confirm block" : "Submit report", role: target.block ? .destructive : nil) {
+                    Task { await submit() }
+                }
+                if !error.isEmpty { Text(error) }
+            }
+            .navigationTitle(target.block ? "Block listener?" : "Report " + target.kind)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
+            .disabled(busy)
+        }.interactiveDismissDisabled(busy).presentationDetents([.medium, .large])
+    }
+
+    @MainActor private func submit() async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            if target.block {
+                try await app.blockMember(target.uid, name: target.name)
+                completed("Listener blocked.")
+            } else {
+                let receipt = try await app.api.report(target.uid, kind: target.kind, reason: reason, details: details, operation: target.id)
+                completed("Report received · " + receipt.prefix(8))
+            }
+        } catch { self.error = error.localizedDescription }
     }
 }

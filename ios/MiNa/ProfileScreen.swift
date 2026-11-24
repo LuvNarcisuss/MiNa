@@ -21,12 +21,25 @@ struct ProfileScreen: View {
     @State private var term = ""
     @State private var searched = ""
     @State private var showDreams = false
+    @State private var videoCount: Int?
     @State private var latestEntry: ProfileRecord?
     @State private var entriesLoaded = false
     @State private var busy = false
     @State private var ready = false
     @State private var notice = ""
     @State private var safety: String?
+    @State private var reports: [ProfileRecord] = []
+    @State private var undo: SafetyUndo?
+    private enum SafetyUndo: Identifiable {
+        case unblock(String, String), withdraw(String)
+        var id: String {
+            switch self { case .unblock(let id, _), .withdraw(let id): return id }
+        }
+        var title: String {
+            switch self { case .unblock(_, let name): return "Unblock " + name + "?"
+            case .withdraw: return "Withdraw this report?" }
+        }
+    }
     @State private var reportOpen = false
     @State private var reportReason = "Harassment"
     @State private var reportContext = ""
@@ -42,11 +55,13 @@ struct ProfileScreen: View {
 
     var body: some View {
         Group {
-            if lists.contains(route.name) { peopleList }
+            if route.name == "profile.reports" { reportHistory }
+            else if lists.contains(route.name) { peopleList }
             else if !ready || profile.isEmpty {
                 VStack { if !ready { ProgressView() } else { Text("Profile unavailable") } }
             } else if route.name == "profile.edit" { edit }
             else if route.name == "profile.privacy" { privacy }
+            else if route.name == "person" && other != me { publicProfile }
             else { overview }
         }
         .frame(maxWidth: .infinity,maxHeight: .infinity)
@@ -57,9 +72,7 @@ struct ProfileScreen: View {
                     .padding(10).background(.regularMaterial)
             }
         }
-        .task(id: route) { await load() }
-        .environment(\.colorScheme,.light)
-        .preferredColorScheme(route.name == "profile" ? .dark : .light)
+        .task(id: "\(route)-\(app.safetyRevision)") { await load() }
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $reportOpen) {
             Form {
@@ -77,119 +90,251 @@ struct ProfileScreen: View {
         .confirmationDialog(safety ?? "", isPresented: Binding(get: { safety != nil }, set: { if !$0 { safety = nil } }), titleVisibility: .visible) {
             if safety == "Block listener?" {
                 Button("Block", role: .destructive) { Task { await perform {
-                    try await app.api.rest("blocks", method: "POST", body: ["blocked_id": other], prefer: "resolution=ignore-duplicates")
-                    var names = app.state("people") as? [String: String] ?? [:]
-                    names[other] = profile["name"] as? String
-                    do { try app.save("people", names) }
-                    catch { throw MiNaIssue("This listener is blocked. Their name could not be saved in the local blocked list.") }
-                    app.back()
+                    try await app.blockMember(other, name: profile["name"] as? String ?? "Listener")
                 } } }
             }
         }
+        .alert(undo?.title ?? "", isPresented: Binding(get: { undo != nil }, set: { if !$0 { undo = nil } }), presenting: undo) { action in
+            Button("Cancel", role: .cancel) {}
+            Button("Confirm", role: .destructive) { Task { await perform {
+                switch action {
+                case .unblock(let id, _):
+                    try await app.api.rest("blocks?owner_id=eq." + me + "&blocked_id=eq." + id, method: "DELETE")
+                case .withdraw(let id):
+                    try await app.api.rest("rpc/withdraw_report", method: "POST", body: ["receipt": id])
+                }
+                app.safetyChanged()
+            } } }
+        }
+    }
+
+    private var reportHistory: some View {
+        List {
+            if !ready { ProgressView() }
+            else if reports.isEmpty { Text("You have no reports.") }
+            ForEach(reports.indices, id: \.self) { index in
+                let row = reports[index]
+                if let id = row["id"] as? String {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text((row["target_kind"] as? String ?? "Item").capitalized).font(.caption)
+                        Text(row["target_label"] as? String ?? "Reported item").font(.headline)
+                        Text(row["reason"] as? String ?? "")
+                        Text("Receipt " + String(id.prefix(8))).font(.caption)
+                        if row["withdrawn_at"] is String { Text("Withdrawn").foregroundStyle(.secondary) }
+                        else { Button("Withdraw report") { undo = .withdraw(id) }.disabled(busy) }
+                    }.padding(.vertical, 3)
+                    .contextMenu {
+                        if !(row["withdrawn_at"] is String) { Button("Withdraw report") { undo = .withdraw(id) } }
+                    }
+                }
+            }
+        }.navigationTitle("Report history")
     }
 
     private var overview: some View {
         ScrollView {
             VStack(spacing: 12) {
-                if other == me {
-                    HStack {
-                        Text("Profile").font(.title.bold()).foregroundStyle(.white)
-                        Spacer()
-                        Button { app.go("profile.search") } label: {
-                            HStack { Text("Find people"); NativeArt("profile", 3).scaledToFit().frame(width: 17) }
-                                .font(.caption).padding(.horizontal, 12).frame(minHeight: 44)
-                                .background(.white.opacity(0.22), in: Capsule())
-                        }.foregroundStyle(.white)
-                    }
-                    Button { app.go("profile.edit") } label: {
-                        NativePortrait(path: profile["avatar_path"] as? String ?? "", size: 84)
-                            .overlay(Circle().stroke(.white,lineWidth: 2))
-                            .overlay(alignment: .bottomTrailing) { NativeArt("profile",4).scaledToFit().frame(width: 24) }
-                    }.accessibilityLabel("Edit profile")
-                    Text(profile["name"] as? String ?? "").font(.title3.bold())
-                    if let bio = profile["bio"] as? String, !bio.isEmpty { Text(bio).font(.footnote) }
-                    socialCounts
-                    HStack { workLink("My posts","feed.mine",5); workLink("My dreams","dreams.mine",6) }
-                    Button { app.go("wallet") } label: {
-                        NativeArt("profile",7).scaledToFit().overlay(alignment: .leading) {
-                            if let balance { Text(balance.formatted()).font(.footnote.bold()).padding(.leading,70).padding(.top,22) }
-                        }.overlay(alignment: .trailing) { NativeArt("profile",8).scaledToFit().frame(width: 84).padding(.trailing,8) }
-                    }.accessibilityLabel("My wallet")
-                    Text("More settings").font(.headline).frame(maxWidth: .infinity,alignment: .leading)
-                    ForEach(menus.indices, id: \.self) { index in
-                        let item = menus[index]
-                        Button { app.go(item.1) } label: { NativeArt("profile",item.2).scaledToFit() }.accessibilityLabel(item.0)
-                    }
-                    Button { app.go("logout") } label: { NativeArt("profile",18).scaledToFit().frame(width: 175,height: 44) }.accessibilityLabel("Sign out")
-                } else {
-                    publicHeader
-                    HStack {
-                        Button { app.go("messages.thread",other) } label: { NativeArt("publicProfile",4).scaledToFit() }
-                            .accessibilityLabel("Chat").disabled(profile["allow_messages"] as? Bool == false)
-                        Button { Task { await toggleFollow() } } label: {
-                            if followers.contains(me) { Text("Following").frame(maxWidth: .infinity,minHeight: 48).background(.mint.opacity(0.25),in: Capsule()) }
-                            else { NativeArt("publicProfile",5).scaledToFit() }
-                        }.disabled(busy).accessibilityLabel(followers.contains(me) ? "Following" : "Follow")
-                    }
-                    Picker("Published work",selection: $showDreams) {
-                        Text("Historical posts").tag(false); Text("Previous dreams").tag(true)
-                    }.pickerStyle(.segmented)
-                    if let entry = latestEntry, let id = entry["id"] as? String {
-                        VStack(alignment: .leading,spacing: 10) {
-                            HStack {
-                                NativePortrait(path: profile["avatar_path"] as? String ?? "",size: 38)
-                                Text(profile["name"] as? String ?? "Listener").bold()
-                            }
-                            Button { app.go(showDreams ? "dreams.detail" : "feed.post",id) } label: {
-                                Text(entry["caption"] as? String ?? "").frame(maxWidth: .infinity,alignment: .leading)
-                            }.buttonStyle(.plain)
-                            if let path = entry["media_path"] as? String {
-                                CommunityMedia(path:path,duration:(entry["duration"] as? NSNumber)?.doubleValue ?? 0,voice:showDreams,remote:true)
-                            }
-                        }.padding().background(.white,in: RoundedRectangle(cornerRadius: 14))
-                    } else if entriesLoaded { Text(showDreams ? "No dreams yet." : "No posts yet.").font(.footnote) }
-                    Button(showDreams ? "View all dreams" : "View all posts") { app.go(showDreams ? "dreams.author" : "feed.author",other) }
-                        .task(id: other + String(showDreams)) {
-                            latestEntry = nil; entriesLoaded = false
-                            do {
-                                let kind = showDreams ? "dream" : "post"
-                                let rows = try await app.api.rows("entry_feed?select=id,caption,media_path,duration&owner_id=eq." + other + "&kind=eq." + kind + "&order=created_at.desc,id.desc&limit=1")
-                                try Task.checkCancellation()
-                                latestEntry = rows.first; entriesLoaded = true
-                            } catch { if !Task.isCancelled { notice = error.localizedDescription } }
-                        }
+                HStack {
+                    Text("Profile").font(.title.bold()).foregroundStyle(.white)
+                    Spacer()
+                    Button { app.go("profile.search") } label: {
+                        HStack { Text("Find people"); NativeArt("profile", 3).scaledToFit().frame(width: 17) }
+                            .font(.caption).padding(.horizontal, 12).frame(minHeight: 44)
+                            .background(.white.opacity(0.22), in: Capsule())
+                    }.foregroundStyle(.white)
                 }
+                Button { app.go("profile.edit") } label: {
+                    NativePortrait(path: profile["avatar_path"] as? String ?? "", size: 84)
+                        .overlay(Circle().stroke(.white,lineWidth: 2))
+                        .overlay(alignment: .bottomTrailing) { NativeArt("profile",4).scaledToFit().frame(width: 24) }
+                }.accessibilityLabel("Edit profile")
+                Text(profile["name"] as? String ?? "").font(.title3.bold())
+                if let bio = profile["bio"] as? String, !bio.isEmpty { Text(bio).font(.footnote) }
+                socialCounts
+                HStack { workLink("My posts","feed.mine",5); workLink("My dreams","dreams.mine",6) }
+                Button { app.go("wallet") } label: {
+                    NativeArt("profile",7).scaledToFit().overlay(alignment: .leading) {
+                        if let balance { Text(balance.formatted()).font(.footnote.bold()).padding(.leading,70).padding(.top,22) }
+                    }.overlay(alignment: .trailing) { NativeArt("profile",8).scaledToFit().frame(width: 84).padding(.trailing,8) }
+                }.accessibilityLabel("My wallet")
+                Text("More settings").font(.headline).frame(maxWidth: .infinity,alignment: .leading)
+                ForEach(menus.indices, id: \.self) { index in
+                    let item = menus[index]
+                    Button { app.go(item.1) } label: {
+                        if item.1 == "profile.privacy" {
+                            HStack(spacing: 8) {
+                                GeometryReader { _ in
+                                    NativeArt("profile", item.2).frame(width: 350, height: 54)
+                                }.frame(width: 52, height: 54).clipped()
+                                Text(item.0).font(.body).foregroundStyle(.secondary)
+                                Spacer()
+                            }.background(.white, in: RoundedRectangle(cornerRadius: 8))
+                        } else {
+                            NativeArt("profile",item.2).scaledToFit()
+                        }
+                    }.accessibilityLabel(item.0)
+                    if item.1 == "profile.blocked" {
+                        Button { app.go("profile.reports") } label: {
+                            Label("Report history", systemImage: "flag").frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                                .padding(.horizontal).background(.white, in: RoundedRectangle(cornerRadius: 8))
+                        }
+                    }
+                }
+                Button { app.go("logout") } label: { NativeArt("profile",18).scaledToFit().frame(width: 175,height: 44) }.accessibilityLabel("Sign out")
             }.padding(.horizontal,16).padding(.bottom)
         }
-        .toolbar(other == me ? .hidden : .visible, for: .navigationBar)
-        .toolbar {
-            if other != me {
-                Menu {
-                    Button("Report profile") { notice = ""; reportOpen = true }
-                    Button("Block listener", role: .destructive) { safety = "Block listener?" }
-                } label: { NativeArt("publicProfile",12).scaledToFit().frame(width:24) }.accessibilityLabel("More")
+        .toolbar(.hidden, for: .navigationBar)
+    }
+
+    private var publicProfile: some View {
+        GeometryReader { viewport in
+            ScrollView {
+                VStack(spacing: -20) {
+                    publicHeader
+                        .frame(minHeight: viewport.size.width * 526 / 390, alignment: .bottom)
+                        .background {
+                            GeometryReader { box in
+                                ZStack {
+                                    Color(red: 0.22, green: 0.38, blue: 0.40)
+                                    if let path = profile["avatar_path"] as? String, !path.isEmpty {
+                                        PublicCoverPhoto(path: path)
+                                    }
+                                    LinearGradient(stops: [
+                                        .init(color: .clear, location: 0.42),
+                                        .init(color: .black.opacity(0.72), location: 1)
+                                    ], startPoint: .top, endPoint: .bottom)
+                                }.frame(width: box.size.width, height: box.size.height).clipped()
+                            }.accessibilityHidden(true)
+                        }
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 12) {
+                            Button { app.go("messages.thread", other) } label: {
+                                NativeArt("publicProfile", 4).scaledToFit()
+                            }.accessibilityLabel("Chat").disabled(profile["allow_messages"] as? Bool == false)
+                            followButton
+                        }
+                        HStack(spacing: 18) {
+                            workTab(false)
+                            workTab(true)
+                        }
+                        publicWork
+                    }
+                    .padding(20).frame(maxWidth: .infinity, alignment: .leading)
+                    .background(alignment: .top) {
+                        ZStack(alignment: .top) {
+                            Color(red: 0.92, green: 0.99, blue: 0.99)
+                            NativeArt("publicProfile", 2).scaledToFit()
+                        }
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 20))
+                }
+            }.ignoresSafeArea(edges: .top)
+            .overlay(alignment: .top) {
+                HStack {
+                    Button { app.back() } label: { coverControl(3) }.accessibilityLabel("Back")
+                    Spacer()
+                    Menu {
+                        Button("Report profile") { notice = ""; reportOpen = true }
+                        Button("Block listener", role: .destructive) { safety = "Block listener?" }
+                    } label: { coverControl(12) }.accessibilityLabel("More")
+                }.padding(.horizontal, 10)
             }
         }
+        .toolbar(.hidden, for: .navigationBar)
+        .buttonStyle(.plain)
+        .task(id: other + String(showDreams)) { await loadPublicWork() }
+    }
+
+    private func coverControl(_ index: Int) -> some View {
+        NativeArt("publicProfile", index).scaledToFit().frame(width: 24, height: 24)
+            .padding(4).background(.white.opacity(0.55), in: Circle()).frame(width: 44, height: 44)
     }
 
     private var publicHeader: some View {
-        VStack(alignment: .leading,spacing: 10) {
-            Spacer(minLength: 150)
+        VStack(alignment: .leading, spacing: 8) {
             Text(profile["name"] as? String ?? "").font(.title.bold())
-            if let bio = profile["bio"] as? String, !bio.isEmpty { Text(bio) }
-            socialCounts
-        }.padding().frame(maxWidth: .infinity,alignment: .leading).foregroundStyle(.white)
-            .background {
-                GeometryReader { box in
-                    ZStack {
-                        NativeArt("publicProfile",1).scaledToFill()
-                        if let path = profile["avatar_path"] as? String, !path.isEmpty {
-                            PublicCoverPhoto(path: path)
-                        }
-                        LinearGradient(colors: [.clear,.black.opacity(0.76)],startPoint: .top,endPoint: .bottom)
-                    }.frame(width:box.size.width,height:box.size.height).clipped()
+            if let bio = profile["bio"] as? String, !bio.isEmpty { Text(bio).font(.subheadline) }
+            HStack(spacing: 0) {
+                publicMetric("Following", following.count)
+                metricDivider
+                publicMetric("Followers", followers.count)
+                metricDivider
+                publicMetric("Friends", following.intersection(followers).count)
+                metricDivider
+                publicMetric("Videos", videoCount)
+            }.padding(.top, 4)
+        }.frame(maxWidth: .infinity, alignment: .leading).foregroundStyle(.white)
+            .padding(.horizontal, 16).padding(.bottom, 35).padding(.top, 110)
+    }
+
+    private var metricDivider: some View { Color.white.opacity(0.65).frame(width: 1, height: 24) }
+
+    private func publicMetric(_ label: String, _ value: Int?) -> some View {
+        VStack(spacing: 6) {
+            Text(value?.formatted() ?? "–").font(.title3.weight(.semibold))
+            Text(label).font(.caption).foregroundStyle(.white.opacity(0.88))
+        }.frame(maxWidth: .infinity).accessibilityElement(children: .combine)
+    }
+
+    private var followButton: some View {
+        Button { Task { await toggleFollow() } } label: {
+            if followers.contains(me) {
+                Capsule().fill(communityGradient).aspectRatio(338.0 / 108.0, contentMode: .fit)
+                    .overlay { Text("Following").font(.headline.bold()).foregroundStyle(.black.opacity(0.78)) }
+            } else { NativeArt("publicProfile", 5).scaledToFit() }
+        }.disabled(busy).accessibilityLabel(followers.contains(me) ? "Following" : "Follow")
+    }
+
+    private func workTab(_ dreams: Bool) -> some View {
+        let selected = showDreams == dreams
+        return Button { showDreams = dreams } label: {
+            VStack(spacing: 3) {
+                NativeArt("publicProfile", dreams ? (selected ? 10 : 8) : (selected ? 7 : 9))
+                    .scaledToFit().frame(maxWidth: dreams ? 127 : 119)
+                NativeArt("publicProfile", 11).scaledToFit().frame(maxWidth: 115).opacity(selected ? 1 : 0)
+            }.frame(minHeight: 44)
+        }.accessibilityLabel(dreams ? "Previous dreams" : "Historical posts")
+            .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    @ViewBuilder private var publicWork: some View {
+        if let entry = latestEntry, let id = entry["id"] as? String {
+            HStack {
+                NativePortrait(path: profile["avatar_path"] as? String ?? "", size: 44)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(profile["name"] as? String ?? "").font(.subheadline.weight(.semibold))
+                    if let raw = entry["created_at"] as? String {
+                        Text(communityTimestamp(raw)).font(.caption).foregroundStyle(.secondary)
+                    }
                 }
-            }.clipShape(RoundedRectangle(cornerRadius: 16))
+                Spacer()
+            }
+            Button { app.go(showDreams ? "dreams.detail" : "feed.post", id) } label: {
+                Text(entry["caption"] as? String ?? "").font(.subheadline)
+                    .multilineTextAlignment(.leading).frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if let path = entry["media_path"] as? String {
+                CommunityMedia(path: path, duration: entry.communitySeconds("duration"), voice: showDreams,
+                               remote: true, openPost: showDreams ? nil : { app.go("feed.post", id) })
+            }
+        } else if entriesLoaded {
+            Text(showDreams ? "No dreams yet." : "No posts yet.").font(.subheadline)
+        } else if notice.isEmpty { ProgressView() }
+        Button(showDreams ? "View all dreams" : "View all posts") {
+            app.go(showDreams ? "dreams.author" : "feed.author", other)
+        }.font(.subheadline.weight(.semibold)).frame(minHeight: 44)
+    }
+
+    private func loadPublicWork() async {
+        latestEntry = nil
+        entriesLoaded = false
+        let kind = showDreams ? "dream" : "post"
+        do {
+            let result = try await app.api.rows("entry_feed?select=id,caption,media_path,duration,created_at&owner_id=eq." + other + "&kind=eq." + kind + "&order=created_at.desc,id.desc&limit=1")
+            try Task.checkCancellation()
+            latestEntry = result.first
+            entriesLoaded = true
+        } catch { if !Task.isCancelled { notice = error.localizedDescription } }
     }
 
     private var socialCounts: some View {
@@ -225,10 +370,9 @@ struct ProfileScreen: View {
                         Text(item["name"] as? String ?? "Listener")
                         Spacer()
                         if route.name == "profile.blocked" {
-                            Button("Unblock") { Task { await perform {
-                                try await app.api.rest("blocks?owner_id=eq." + me + "&blocked_id=eq." + id, method: "DELETE")
-                                await load()
-                            } } }.disabled(busy)
+                            Button("Unblock") { undo = .unblock(id, item["name"] as? String ?? "listener") }
+                                .disabled(busy)
+                                .contextMenu { Button("Unblock") { undo = .unblock(id, item["name"] as? String ?? "listener") } }
                         } else { Button("View") { app.go("person", id) } }
                     }
                 }
@@ -290,11 +434,15 @@ struct ProfileScreen: View {
                 }
                 field("Language","language")
                 field("Signature","bio")
-                Button { Task { await saveProfile() } } label: {
-                    NativeArt("edit",14).scaledToFit().frame(maxWidth: 282)
-                }.frame(maxWidth: .infinity).accessibilityLabel("Save")
             }.padding()
-        }.disabled(busy).navigationTitle("Edit profile")
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            Button { Task { await saveProfile() } } label: {
+                NativeArt("edit",14).scaledToFit().frame(maxWidth: 282).frame(height: 52)
+            }.frame(maxWidth: .infinity).padding(.vertical, 6)
+                .background(.regularMaterial).accessibilityLabel("Save")
+        }
+        .disabled(busy).navigationTitle("Edit profile")
         .navigationBarBackButtonHidden(busy)
         .onDisappear { discardAvatar() }
     }
@@ -365,12 +513,18 @@ struct ProfileScreen: View {
                 do { try cacheProfile(remote) } catch { notice = "Your profile loaded. Its copy on this iPhone could not be updated." }
             }
             edges = try await app.api.rows("follows?select=follower_id,followed_id&or=(follower_id.eq." + owner + ",followed_id.eq." + owner + ")")
+            if route.name == "person", owner != me {
+                videoCount = try await app.api.rest("entry_feed?select=id&owner_id=eq." + owner + "&kind=eq.post&limit=1", method: "HEAD", prefer: "count=exact") as? Int
+            }
             if route.name == "profile" { balance = try await app.api.rows("wallets?select=balance&owner_id=eq." + me).first?["balance"] as? Int }
-            if route.name == "profile.blocked" {
+            if route.name == "profile" { app.didRefreshRoot("profile") }
+            if route.name == "profile.reports" {
+                reports = try await app.api.rows("reports?select=id,target_kind,target_label,reason,withdrawn_at&reporter_id=eq." + me + "&order=created_at.desc")
+            } else if route.name == "profile.blocked" {
                 let names = app.state("people") as? [String:String] ?? [:]
-                people = try await app.api.rows("blocks?select=blocked_id&owner_id=eq." + me).compactMap { row in
+                people = try await app.api.rows("blocks?select=blocked_id,blocked_name&owner_id=eq." + me).compactMap { row in
                     guard let id = row["blocked_id"] as? String else { return nil }
-                    return ["id":id, "name":names[id] ?? "Listener " + String(id.prefix(6))]
+                    return ["id":id, "name":row["blocked_name"] as? String ?? names[id] ?? "Listener " + String(id.prefix(6))]
                 }
             } else if lists.contains(route.name) {
                 var filter = ""
@@ -407,14 +561,10 @@ struct ProfileScreen: View {
 
     private func submitReport() async {
         await perform {
-            let id = reportID.uuidString.lowercased()
-            let reason = String((reportReason + (reportContext.isEmpty ? "" : " · " + reportContext)).prefix(1000))
-            let result = try await app.api.rest("reports?select=id", method: "POST", body: ["id":id,"reporter_id":me,"target_id":other,"target_kind":"profile","reason":reason], prefer: "return=representation,resolution=ignore-duplicates")
-            var receipt = (result as? [ProfileRecord])?.first?["id"] as? String
-            if receipt == nil { receipt = try await app.api.rows("reports?select=id&id=eq." + id + "&reporter_id=eq." + me).first?["id"] as? String }
-            guard let receipt else { throw MiNaIssue("Your report could not be confirmed. Please retry.") }
+            let receipt = try await app.api.report(other, kind: "profile", reason: reportReason, details: reportContext, operation: reportID)
             reportOpen = false; reportID = UUID(); reportContext = ""
-            notice = "Report received · " + String(receipt.prefix(8))
+            app.back(); app.safetyChanged()
+            app.safetyNotice = "Report received · " + String(receipt.prefix(8))
         }
     }
 

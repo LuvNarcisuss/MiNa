@@ -113,6 +113,13 @@ struct RoomGifts: View {
                 Text("\(quantity) × " + Self.names[index] + " sent to " + session.name(recipient) + ".")
                 Button("Done") { close() }.buttonStyle(RoomCapsuleStyle())
             } else {
+                if session.room?.roomFlag("allow_gifts") != true {
+                    Text("The host has turned off gift sending in this room.").font(.subheadline)
+                } else if !session.active {
+                    Text("Reconnect to the room to send a gift.").font(.subheadline)
+                } else if others.isEmpty {
+                    Text("You can send a gift when another listener joins.").font(.subheadline)
+                }
                 if !confirm {
                     Picker("Gift source",selection: Binding(get: { backpack },set: { value in
                         change($backpack,value); quantity = 1
@@ -135,14 +142,26 @@ struct RoomGifts: View {
                 LabeledContent("Balance",value: balance.map { "\($0) coins" } ?? "Unavailable")
                 if let total,let balance,total > balance {
                     Text("Insufficient balance").font(.headline)
-                    Button("Open wallet") { do { try retain(operation); try openWallet() } catch { self.error = error.localizedDescription } }
-                } else {
-                    Button(confirm ? "Confirm and send" : "Review gift") { if confirm { send() } else { confirm = true } }.buttonStyle(RoomCapsuleStyle()).disabled(!valid || busy)
                 }
                 if confirm { Button("Change selection") { confirm = false }.disabled(busy) }
             }
             if !error.isEmpty { Text(error); Button("Refresh catalog") { retry += 1 } }
-        }.interactiveDismissDisabled(busy).task(id: retry) {
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if !sent {
+                Group {
+                    if let total, let balance, total > balance {
+                        Button("Open wallet") { do { try retain(operation); try openWallet() } catch { self.error = error.localizedDescription } }
+                    } else {
+                        Button(confirm ? "Confirm and send" : "Review gift") {
+                            if confirm { send() } else { confirm = true }
+                        }.disabled(!valid || busy)
+                    }
+                }.buttonStyle(RoomCapsuleStyle()).padding(.horizontal, 16).padding(.vertical, 8)
+                    .background(Color(red: 0.91, green: 0.99, blue: 0.99))
+            }
+        }
+        .interactiveDismissDisabled(busy).task(id: retry) {
             if retry == 0,let state = app.state(key) as? RoomRow {
                 index = min(max(0,state["index"] as? Int ?? 0),Self.names.count-1)
                 quantity = min(max(1,state["quantity"] as? Int ?? 1),99); recipient = state.roomText("recipient")

@@ -6,13 +6,17 @@ typealias CommunityRow = [String: Any]
 extension Dictionary where Key == String, Value == Any {
     func communityString(_ key: String) -> String { self[key] as? String ?? "" }
     func communitySeconds(_ key: String) -> Double { (self[key] as? NSNumber)?.doubleValue ?? 0 }
+    fileprivate var communityListID: String {
+        if let id = self["id"] as? String { return id }
+        return communityString("entry_id") + "/" + communityString("owner_id")
+    }
 }
 
 private func queryValue(_ text: String) -> String {
     text.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
 }
 
-private func timestamp(_ raw: String) -> String {
+func communityTimestamp(_ raw: String) -> String {
     let parser = ISO8601DateFormatter()
     parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
     let date = parser.date(from: raw) ?? ISO8601DateFormatter().date(from: raw)
@@ -35,9 +39,7 @@ struct CommunityScreen: View {
             }
         }
         .id(route.name + (route.id ?? ""))
-        .background { NativeArt(route.name == "feed" ? "home" : "dreams", 1).ignoresSafeArea().accessibilityHidden(true) }
-        .environment(\.colorScheme, .light)
-        .preferredColorScheme(route.name == "feed" ? .dark : .light)
+        .background { NativeArt(route.name == "feed" ? "home" : route.name == "feed.post" ? "post" : "dreams", 1).ignoresSafeArea().accessibilityHidden(true) }
         .tint(Color(red: 0.02, green: 0.43, blue: 0.43))
     }
 }
@@ -46,6 +48,19 @@ private let readings = [
     ("journal-moon-window","A window left open","For a moment, the whole street was quiet enough to hear the curtains move.","Across the courtyard, one window stayed lit. A spoon touched the side of a cup, then the light went out. The curtains lifted again. For once, there was nothing else I needed to do.","moon-seat"),
     ("journal-falling-star","One last star","I watched a small light cross the sky and forgot to make a wish.","Maybe it was a plane. Maybe someone in a window seat was watching the lights below, trying to guess which one was home. I pulled the blanket to my chin and let the thought drift on.","star-pillow")
 ]
+
+private struct CommunityReportTarget: Identifiable {
+    let id: String
+    let kind: String
+    let owner: String
+}
+
+private struct DiscussionNote: Identifiable {
+    let id: String
+    let row: CommunityRow
+    let parentID: String
+    let parentName: String?
+}
 
 private struct CommunityListing: View {
     @EnvironmentObject var app: MiNaAppModel
@@ -67,7 +82,14 @@ private struct CommunityListing: View {
     @State private var text = ""
     @State private var emoji = false
     @State private var commentID = UUID()
+    @State private var replyID: String?
+    @State private var replyName = ""
     @State private var sending = false
+    @State private var postOptions = false
+    @State private var reportTarget: CommunityReportTarget?
+    @State private var leavingReportedDetail = false
+    @State private var loadedSafetyRevision = -1
+    private var visibleRows: [CommunityRow] { loadedSafetyRevision == app.safetyRevision ? rows : [] }
     @FocusState private var editingComment: Bool
     private var name: String { route.name }
     private var dream: Bool { name.hasPrefix("dreams") }
@@ -75,9 +97,12 @@ private struct CommunityListing: View {
     private var author: Bool { name.hasSuffix(".author") }
     private var detail: Bool { ["dreams.detail","feed.post"].contains(name) }
     private var activity: Bool { ["feed.likes","feed.activity"].contains(name) }
+    private var loadKey: String {
+        "\(following)|\(likes)|\(query)|\(limit)|\(revision)|\(app.safetyRevision)"
+    }
     private var title: String {
         if activity { return "Activity" }
-        if detail { return dream ? "Dream" : "Post" }
+        if detail { return dream ? "Dream" : "Details" }
         if mine { return dream ? "My Dreams" : "My Posts" }
         if author { return dream ? "Dreams" : "Posts" }
         return name == "feed.read" ? "Bedtime reading" : "Dream Space"
@@ -90,37 +115,38 @@ private struct CommunityListing: View {
     }
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 14) {
-                controls
-                if !failure.isEmpty {
-                    Text(failure)
-                    Button("Try again") { revision += 1 }
-                } else if !loaded && name != "feed.read" { ProgressView("Loading…") }
-                ForEach(rows.indices, id: \.self) { i in
-                    let row = rows[i]
-                    if activity { activityRow(row) }
-                    else {
-                        CommunityEntry(row: row, profile: profiles[row.communityString("owner_id")] ?? [:], followed: follows.contains(row.communityString("owner_id")), detail: detail, mine: mine, update: { revision += 1 }, issue: { message = $0 }, focus: { editingComment = true })
-                            .id(row.communityString("id"))
+            VStack(alignment: .leading, spacing: 0) {
+                if name == "feed.post", let row = visibleRows.first { entry(row) }
+                LazyVStack(alignment: .leading, spacing: 14) {
+                    controls
+                    if !failure.isEmpty {
+                        Text(failure)
+                        Button("Try again") { revision += 1 }
+                    } else if (!loaded || loadedSafetyRevision != app.safetyRevision) && name != "feed.read" { ProgressView("Loading…") }
+                    if name != "feed.post" {
+                        ForEach(visibleRows, id: \.communityListID) { row in
+                            if activity { activityRow(row) }
+                            else { entry(row) }
+                        }
                     }
+                    ForEach(readIndices, id: \.self) { i in reading(i) }
+                    if ((loaded && loadedSafetyRevision == app.safetyRevision) || name == "feed.read") && visibleRows.isEmpty && readIndices.isEmpty {
+                        VStack(spacing: 8) {
+                            NativeArt(activity && likes ? "likes" : "activity", activity && likes ? 5 : 4).scaledToFit().frame(width: 112,height: 108).accessibilityHidden(true)
+                            Text(detail || name == "feed.read" ? "Content unavailable" : activity ? (likes ? "No likes yet" : "No comments yet") : !query.isEmpty ? "No matches" : dream ? "No dreams yet" : "No posts yet").font(.headline)
+                            if detail { Text("This entry was removed or is no longer available to you.") }
+                            if following { Text("Entries from people you follow will appear here.") }
+                        }.font(.subheadline).foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(.top, activity ? 145 : 50).multilineTextAlignment(.center)
+                    }
+                    if more { Button("Load more") { limit += 30 } }
+                    if detail && !dream && !visibleRows.isEmpty { discussion }
                 }
-                ForEach(readIndices, id: \.self) { i in reading(i) }
-                if (loaded || name == "feed.read") && rows.isEmpty && readIndices.isEmpty {
-                    VStack(spacing: 8) {
-                        NativeArt(activity && likes ? "likes" : "activity", activity && likes ? 5 : 4).scaledToFit().frame(width: 112,height: 108).accessibilityHidden(true)
-                        Text(detail || name == "feed.read" ? "Content unavailable" : activity ? (likes ? "No likes yet" : "No comments yet") : !query.isEmpty ? "No matches" : dream ? "No dreams yet" : "No posts yet").font(.headline)
-                        if detail { Text("This entry was removed or is no longer available to you.") }
-                        if following { Text("Entries from people you follow will appear here.") }
-                    }.font(.subheadline).foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(.top, activity ? 145 : 50).multilineTextAlignment(.center)
-                }
-                if more { Button("Load more") { limit += 30 } }
-                if detail && !dream && !rows.isEmpty { discussion }
             }.padding(.horizontal, 20).padding(.vertical, 4)
         }
         .navigationTitle(name == "feed" ? "" : title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(.hidden, for: .navigationBar)
-        .toolbar(name == "feed" ? .hidden : .visible, for: .navigationBar)
+        .toolbar(name == "feed" || name == "feed.post" ? .hidden : .visible, for: .navigationBar)
         .toolbar {
             if mine || (dream && !author && !detail) {
                 ToolbarItem(placement: .navigationBarTrailing) {
@@ -130,26 +156,66 @@ private struct CommunityListing: View {
                 }
             }
         }
-        .safeAreaInset(edge: .bottom) { if detail && !dream && !rows.isEmpty { commentInput.padding(.horizontal,12) } }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if name == "feed.post" {
+                HStack {
+                    Button { app.back() } label: { NativeArt("post", 3).scaledToFit().frame(width: 24).frame(width: 44, height: 44) }
+                        .accessibilityLabel("Back")
+                    Spacer()
+                    Text(title).font(.headline)
+                    Spacer()
+                    Button { postOptions = true } label: { NativeArt("post", 2).scaledToFit().frame(width: 24).frame(width: 44, height: 44) }
+                        .accessibilityLabel("More options").disabled(visibleRows.isEmpty)
+                }.padding(.horizontal, 10).foregroundStyle(.primary)
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            if name == "feed.post" && !visibleRows.isEmpty {
+                VStack(spacing: 5) { commentInput }.padding(.horizontal, 20).padding(.bottom, 4)
+            }
+        }
         .refreshable { revision += 1 }
         .overlay(alignment: .bottomTrailing) {
-            if name == "feed" { Button { app.go("ai") } label: { NativeArt("inbox",6).scaledToFit().frame(width:25,height:25).padding(14).background(LinearGradient(colors:[Color.mint,Color(red:0.68,green:0.59,blue:0.95)],startPoint:.top,endPoint:.bottom),in:Circle()).shadow(color:.black.opacity(0.12),radius:4) }.accessibilityLabel("Open AI Companion").padding() }
+            if name == "feed" {
+                Button { app.go("ai") } label: {
+                    nativeArtwork("feed", "companion").scaledToFit().frame(width: 56, height: 56)
+                }.buttonStyle(.plain).accessibilityLabel("Open AI Companion")
+                    .padding(.trailing, 20).padding(.bottom, 20)
+            }
         }
         .onAppear { if name == "feed.likes" { likes = true } }
         .onChange(of: "\(following)|\(likes)|\(query)") { _ in rows = []; more = false; loaded = false; failure = "" }
         .onChange(of: scenePhase) { phase in if phase == .active { revision += 1 } }
-        .task(id: "\(following)|\(likes)|\(query)|\(limit)|\(revision)") {
+        .task(id: loadKey) {
             guard name != "feed.read" else { return }
             do {
                 if !query.isEmpty { try await Task.sleep(nanoseconds: 250_000_000) }
                 while !Task.isCancelled {
-                    do { try await load() } catch { if !Task.isCancelled { failure = error.localizedDescription } }
+                    let key = loadKey
+                    do { try await load(key) } catch {
+                        if key == loadKey && !Task.isCancelled { failure = error.localizedDescription }
+                    }
                     try await Task.sleep(nanoseconds: 45_000_000_000)
                 }
             } catch {}
         }
+        .sheet(item: $reportTarget, onDismiss: {
+            if leavingReportedDetail && app.route == route { app.back() }
+            leavingReportedDetail = false
+        }) { target in
+            CommunityReportSheet(target: target) { reportAccepted(target) }
+        }
         .alert("MiNa", isPresented: Binding(get: { !message.isEmpty }, set: { if !$0 { message = "" } })) { Button("OK") {} } message: { Text(message) }
     }
+    private func entry(_ row: CommunityRow) -> some View {
+        let owner = row.communityString("owner_id")
+        return CommunityEntry(row: row, profile: profiles[owner] ?? [:], followed: follows.contains(owner),
+                              detail: detail, mine: mine, detailOptions: $postOptions,
+                              update: { revision += 1 }, issue: { message = $0 },
+                              report: openReport, removed: { removeEntry(row.communityString("id")) })
+            .id(row.communityString("id"))
+    }
+
     @ViewBuilder private var controls: some View {
         if name == "feed" {
             HStack(spacing:5) {
@@ -188,7 +254,7 @@ private struct CommunityListing: View {
         }
     }
 
-    @MainActor private func load() async throws {
+    @MainActor private func load(_ key: String) async throws {
         let api = app.api
         let me = api.userID
         var entries: [CommunityRow] = []
@@ -196,7 +262,7 @@ private struct CommunityListing: View {
         var followed = Set<String>()
         if activity {
             let table = likes ? "entry_reactions" : "entry_comments"
-            let fields = "entry_id,owner_id,created_at," + (likes ? "" : "body,") + "entries!inner(owner_id,caption,kind)"
+            let fields = "entry_id,owner_id,created_at," + (likes ? "" : "id,body,") + "entries!inner(owner_id,caption,kind)"
             entries = try await api.rows(table + "?select=" + fields + "&entries.owner_id=eq." + me + "&owner_id=neq." + me + (likes ? "&kind=eq.like" : "") + "&order=created_at.desc")
         } else {
             let links = try await api.rows("follows?select=followed_id&follower_id=eq." + me)
@@ -211,18 +277,35 @@ private struct CommunityListing: View {
             }
             if !following || !followed.isEmpty { entries = try await api.rows(path + "&order=created_at.desc,id.desc&limit=\(limit + 1)") }
             if detail && !dream, let id = entries.first?["id"] as? String {
-                notes = try await api.rows("entry_comments?select=id,owner_id,body,created_at&entry_id=eq." + id + "&order=created_at.desc")
+                let path = "entry_comments?select=id,owner_id,parent_id,body,created_at&entry_id=eq." + id + "&order=created_at.desc,id.desc&limit=100"
+                var cursor = ""
+                while true {
+                    try Task.checkCancellation()
+                    let page = try await api.rows(path + cursor)
+                    notes.append(contentsOf: page)
+                    guard page.count == 100, let last = page.last else { break }
+                    let date = queryValue(last.communityString("created_at"))
+                    let note = last.communityString("id")
+                    cursor = "&or=(created_at.lt." + date + ",and(created_at.eq." + date + ",id.lt." + note + "))"
+                }
             }
         }
-        let ids = Set((entries + notes).compactMap { $0["owner_id"] as? String })
+        let ids = Array(Set((entries + notes).compactMap { $0["owner_id"] as? String }))
         var people: [String:CommunityRow] = [:]
-        if !ids.isEmpty {
-            for profile in try await api.rows("profiles?select=id,name,avatar_path&id=in.(" + ids.joined(separator: ",") + ")") { people[profile.communityString("id")] = profile }
+        for offset in stride(from: 0, to: ids.count, by: 60) {
+            try Task.checkCancellation()
+            let batch = ids[offset..<min(offset + 60, ids.count)].joined(separator: ",")
+            for profile in try await api.rows("profiles?select=id,name,avatar_path,country&id=in.(" + batch + ")") {
+                people[profile.communityString("id")] = profile
+            }
         }
         try Task.checkCancellation()
+        guard key == loadKey, me == api.userID else { return }
+        loadedSafetyRevision = app.safetyRevision
         rows = activity ? entries : Array(entries.prefix(limit))
         more = !activity && entries.count > limit
         comments = notes; profiles = people; follows = followed; failure = ""; loaded = true
+        if name == "feed" { app.didRefreshRoot("feed") }
     }
 
     private func activityRow(_ row: CommunityRow) -> some View {
@@ -230,7 +313,7 @@ private struct CommunityListing: View {
         return VStack(alignment: .leading, spacing: 10) {
             CommunityOwner(row: row,profile: profiles[row.communityString("owner_id")] ?? [:])
             Text(likes ? "Liked your " + source.communityString("kind") : row.communityString("body"))
-                .font(.subheadline)
+                .font(ReactionPicker.textFont(for: row.communityString("body"), style: .subheadline))
             Button { app.go(source.communityString("kind") == "dream" ? "dreams.detail" : "feed.post", row.communityString("entry_id")) } label: {
                 HStack {
                     Text(source.communityString("caption").isEmpty ? "View original" : source.communityString("caption"))
@@ -260,37 +343,129 @@ private struct CommunityListing: View {
         }.padding(.vertical,8).overlay(alignment: .bottom) { Divider() }
     }
 
+    private func openReport(_ target: CommunityReportTarget) {
+        guard !target.id.isEmpty, !target.owner.isEmpty, target.owner != app.api.userID else { return }
+        editingComment = false
+        reportTarget = target
+    }
+
+    private func reportAccepted(_ target: CommunityReportTarget) {
+        if target.kind == "comment" {
+            comments.removeAll { $0.communityString("id") == target.id }
+            if replyID == target.id { cancelReply() }
+        } else if target.kind == "post" || target.kind == "dream" {
+            CommunityPlayer.pauseActive()
+            rows.removeAll { $0.communityString("id") == target.id }
+            leavingReportedDetail = detail && route.id == target.id
+        }
+        app.safetyChanged()
+    }
+
+    private func removeEntry(_ id: String) {
+        CommunityPlayer.pauseActive()
+        rows.removeAll { $0.communityString("id") == id }
+        app.safetyChanged()
+        if detail && app.route == route { app.back() }
+    }
+
+    private func memberName(_ owner: String) -> String {
+        let name = profiles[owner]?.communityString("name") ?? ""
+        return name.isEmpty ? "Night listener" : name
+    }
+
+    private var thread: [DiscussionNote] {
+        var authors: [String: String] = [:]
+        for row in comments { authors[row.communityString("id")] = row.communityString("owner_id") }
+        var roots: [CommunityRow] = []
+        var children: [String: [CommunityRow]] = [:]
+        for row in comments {
+            let parent = row.communityString("parent_id")
+            if authors[parent] == nil { roots.append(row) }
+            else { children[parent, default: []].append(row) }
+        }
+        // The query returns newest first. Keep recent roots first and replies in conversation order.
+        var pending = Array(roots.reversed())
+        var result: [DiscussionNote] = []
+        while let row = pending.popLast() {
+            let id = row.communityString("id")
+            let parent = row.communityString("parent_id")
+            result.append(DiscussionNote(id: id, row: row, parentID: parent, parentName: authors[parent].map(memberName)))
+            if let replies = children[id] { pending.append(contentsOf: replies) }
+        }
+        return result
+    }
+
     @ViewBuilder private var discussion: some View {
-        Text("Discussion").font(.headline.bold())
+        NativeArt("post", 6).scaledToFit().frame(width: 82, height: 15).padding(.top, 16).accessibilityLabel("Discussion")
         if comments.isEmpty { Text("No comments yet.") }
-        ForEach(comments.indices, id: \.self) { i in
-            let note = comments[i]
-            VStack(alignment: .leading) {
-                CommunityOwner(row: note, profile: profiles[note.communityString("owner_id")] ?? [:])
-                Text(note.communityString("body"))
-            }.communityCard()
+        ForEach(thread) { note in
+            let owner = note.row.communityString("owner_id")
+            CommunityComment(note: note, profile: profiles[owner] ?? [:], name: memberName(owner), sending: sending,
+                             reply: {
+                                 if replyID != note.id { commentID = UUID() }
+                                 replyID = note.id
+                                 replyName = memberName(owner)
+                                 editingComment = true
+                             }, report: openReport, issue: { message = $0 })
+        }
+    }
+
+    private func cancelReply() {
+        replyID = nil
+        replyName = ""
+        commentID = UUID()
+    }
+
+    private func sendComment() {
+        let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sending, !body.isEmpty, let entry = route.id else { return }
+        let id = commentID.uuidString.lowercased()
+        let owner = app.api.userID
+        let parent = replyID
+        var record = ["id": id, "entry_id": entry, "owner_id": owner, "body": body]
+        record["parent_id"] = parent
+        sending = true
+        Task { @MainActor in
+            defer { sending = false }
+            do {
+                let result = try await app.api.rest("entry_comments?select=id", method: "POST", body: record,
+                                                    prefer: "return=representation,resolution=ignore-duplicates")
+                if (result as? [CommunityRow])?.first?.communityString("id") != id {
+                    let saved = try await app.api.rows("entry_comments?select=body,parent_id&id=eq." + id + "&entry_id=eq." + entry + "&owner_id=eq." + owner)
+                    guard let comment = saved.first, comment.communityString("body") == body,
+                          (comment["parent_id"] as? String) == parent else {
+                        throw MiNaIssue("Your comment could not be confirmed. Please try again.")
+                    }
+                }
+                text = ""
+                cancelReply()
+                emoji = false
+                editingComment = false
+                revision += 1
+            } catch { message = error.localizedDescription }
         }
     }
 
     @ViewBuilder private var commentInput: some View {
+        if replyID != nil {
+            HStack {
+                Text("Replying to " + replyName).font(.footnote.weight(.medium))
+                Spacer()
+                Button("Cancel reply") { cancelReply() }.font(.footnote).frame(minHeight: 44)
+            }.padding(.horizontal, 12).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+                .disabled(sending)
+        }
         HStack {
-            Button { emoji.toggle() } label: { NativeArt("post",10).scaledToFit().frame(width: 24,height: 24).frame(width: 44,height: 44) }.accessibilityLabel("Choose an emoji")
-            TextField("Write a comment…", text: $text).focused($editingComment).onChange(of: text) { value in
+            Button { emoji.toggle() } label: { NativeArt("post",10).scaledToFit().frame(width: 36,height: 36).frame(width: 44,height: 44) }.accessibilityLabel("Choose an emoji")
+            TextField(replyID == nil ? "Write a comment…" : "Write a reply…", text: $text).font(ReactionPicker.textFont(for: text)).focused($editingComment).onChange(of: text) { value in
                 if value.count > 1000 { text = String(value.prefix(1000)) }
                 commentID = UUID()
             }
-            Button {
-                guard !sending else { return }; sending = true
-                Task {
-                    defer { sending = false }
-                    do {
-                        _ = try await app.api.rest("entry_comments", method: "POST", body: ["id":commentID.uuidString,"entry_id":route.id ?? "","owner_id":app.api.userID,"body":text.trimmingCharacters(in: .whitespacesAndNewlines)], prefer: "resolution=ignore-duplicates")
-                        text = ""; emoji = false; editingComment = false; revision += 1
-                    } catch { message = error.localizedDescription }
-                }
-            } label: { NativeArt("post",11).scaledToFit().frame(width: 24,height: 24).frame(width: 44,height: 44) }.accessibilityLabel("Send comment").disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-        }.disabled(sending).padding(.horizontal,8).background(.white,in: Capsule())
-        if emoji { HStack { ForEach(["🌙","✨","💚","😴","🌟","🫶"], id: \.self) { item in Button(item) { text += item } } } }
+            Button(action: sendComment) { NativeArt("post",11).scaledToFit().frame(width: 68,height: 47) }
+                .accessibilityLabel(replyID == nil ? "Send comment" : "Send reply")
+                .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }.disabled(sending).padding(.horizontal,4).padding(.vertical,2).background(.white,in: Capsule())
+        if emoji { ReactionPicker { text += $0 }.disabled(sending) }
     }
 }
 
@@ -312,6 +487,7 @@ private struct CommunityOwner: View {
     @EnvironmentObject var app: MiNaAppModel
     let row: CommunityRow
     let profile: CommunityRow
+    var avatarSize: CGFloat = 40
     @State private var avatar: URL?
     var body: some View {
         let owner = row.communityString("owner_id")
@@ -322,12 +498,141 @@ private struct CommunityOwner: View {
                     Circle().fill(Color.mint.opacity(0.2))
                     Text(String(name.prefix(1))).bold()
                     if let avatar { AsyncImage(url: avatar) { image in image.resizable().scaledToFill() } placeholder: { Color.clear } }
-                }.frame(width: 40, height: 40).clipShape(Circle())
-                VStack(alignment: .leading) { Text(name).bold(); Text(timestamp(row.communityString("created_at"))).font(.caption).foregroundStyle(.secondary) }
+                }.frame(width: avatarSize, height: avatarSize).clipShape(Circle())
+                if avatarSize == 24 {
+                    Text(name).font(.subheadline.weight(.medium))
+                    Text(communityTimestamp(row.communityString("created_at"))).font(.caption2).foregroundStyle(.secondary)
+                } else {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(name).font(.headline)
+                        if avatarSize == 62 && !profile.communityString("country").isEmpty {
+                            Text(profile.communityString("country")).font(.caption).foregroundStyle(.teal)
+                                .padding(.horizontal, 6).background(.mint.opacity(0.2), in: Capsule())
+                        } else {
+                            Text(communityTimestamp(row.communityString("created_at"))).font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }
             }
         }.buttonStyle(.plain).task(id: profile.communityString("avatar_path")) {
             avatar = nil
-            if let path = profile["avatar_path"] as? String, !path.isEmpty { avatar = try? await app.api.mediaURL(path) }
+            if let path = profile["avatar_path"] as? String, !path.isEmpty {
+                let url = try? await app.api.mediaURL(path)
+                if !Task.isCancelled { avatar = url }
+            }
+        }
+    }
+}
+
+private struct CommunityComment: View {
+    @EnvironmentObject var app: MiNaAppModel
+    let note: DiscussionNote
+    let profile: CommunityRow
+    let name: String
+    let sending: Bool
+    let reply: () -> Void
+    let report: (CommunityReportTarget) -> Void
+    let issue: (String) -> Void
+    @State private var confirmingBlock = false
+    @State private var blocking = false
+    private var owner: String { note.row.communityString("owner_id") }
+    private var canModerate: Bool { !owner.isEmpty && !app.api.userID.isEmpty && owner != app.api.userID }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            CommunityOwner(row: note.row, profile: profile, avatarSize: 24)
+                .frame(minHeight: 44)
+            if !note.parentID.isEmpty {
+                Text(note.parentName.map { "Reply to " + $0 } ?? "Reply to an unavailable comment")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Text(note.row.communityString("body")).font(ReactionPicker.textFont(for: note.row.communityString("body"), style: .subheadline))
+            HStack(spacing: 6) {
+                Button("Reply", action: reply).font(.caption.weight(.semibold)).frame(minWidth: 44, minHeight: 44)
+                    .disabled(sending || blocking)
+                if canModerate {
+                    Menu {
+                        Button("Report comment") { report(CommunityReportTarget(id: note.id, kind: "comment", owner: owner)) }
+                        if !profile.isEmpty {
+                            Button("Report author") { report(CommunityReportTarget(id: owner, kind: "profile", owner: owner)) }
+                        }
+                        Button("Block author", role: .destructive) { confirmingBlock = true }
+                    } label: {
+                        Image(systemName: "ellipsis").frame(width: 44, height: 44)
+                    }.accessibilityLabel("More comment options").disabled(blocking || sending)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.leading, note.parentID.isEmpty ? 0 : 24)
+        .confirmationDialog("Block " + name + "?", isPresented: $confirmingBlock, titleVisibility: .visible) {
+            Button("Block author", role: .destructive) {
+                guard canModerate, !blocking else { return }
+                blocking = true
+                Task {
+                    defer { blocking = false }
+                    do { try await app.blockMember(owner, name: name) }
+                    catch { issue(error.localizedDescription) }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+    }
+}
+
+private struct CommunityReportSheet: View {
+    @EnvironmentObject var app: MiNaAppModel
+    @Environment(\.dismiss) private var dismiss
+    let target: CommunityReportTarget
+    let accepted: () -> Void
+    @State private var reason = "Harassment"
+    @State private var details = ""
+    @State private var operation = UUID()
+    @State private var busy = false
+    @State private var failure = ""
+    @State private var receipt: String?
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                if let receipt {
+                    Text("Report received").font(.title2.bold())
+                    Text("Receipt " + String(receipt.prefix(8)))
+                    Button("OK") { dismiss() }.buttonStyle(.borderedProminent)
+                } else {
+                    Text("Report this " + target.kind).font(.title2.bold())
+                    Picker("Reason", selection: $reason) {
+                        ForEach(["Harassment", "Sexual content", "Harmful content", "Privacy concern", "Spam", "Other"], id: \.self) { Text($0) }
+                    }
+                    TextField("Additional details (optional)", text: $details, axis: .vertical)
+                        .onChange(of: details) { value in
+                            if value.count > 950 { details = String(value.prefix(950)) }
+                        }
+                    if !failure.isEmpty { Text(failure).font(.footnote).foregroundStyle(.red) }
+                    Button("Submit report", action: submit).buttonStyle(.borderedProminent)
+                    Button("Cancel") { dismiss() }
+                }
+            }.padding(22).frame(maxWidth: .infinity, alignment: .leading).disabled(busy)
+        }
+        .background { NativeArt("activity",1).ignoresSafeArea() }
+        .presentationDetents([.medium,.large])
+        .interactiveDismissDisabled(busy)
+    }
+
+    private func submit() {
+        guard !busy, receipt == nil else { return }
+        guard !app.api.userID.isEmpty, app.api.userID != target.owner else {
+            failure = "You can only report content from another listener."
+            return
+        }
+        busy = true
+        failure = ""
+        Task {
+            defer { busy = false }
+            do {
+                receipt = try await app.api.report(target.id, kind: target.kind, reason: reason, details: details, operation: operation)
+                accepted()
+            } catch { failure = error.localizedDescription }
         }
     }
 }
@@ -339,21 +644,20 @@ private struct CommunityEntry: View {
     let followed: Bool
     let detail: Bool
     let mine: Bool
+    @Binding var detailOptions: Bool
     let update: () -> Void
     let issue: (String) -> Void
-    let focus: () -> Void
+    let report: (CommunityReportTarget) -> Void
+    let removed: () -> Void
     @State private var busy = false
     @State private var confirm = ""
     @State private var options = false
-    @State private var reporting = false
-    @State private var reason = "Harassment"
-    @State private var context = ""
-    @State private var reportID = UUID()
     private var me: String { app.api.userID }
     private var id: String { row.communityString("id") }
     private var owner: String { row.communityString("owner_id") }
     private var kind: String { row.communityString("kind") }
     private var dream: Bool { kind == "dream" }
+    private var canModerate: Bool { !me.isEmpty && !owner.isEmpty && owner != me }
     private func open() { if !detail { app.go(dream ? "dreams.detail" : "feed.post", id) } }
     private func run(_ action: @escaping @MainActor () async throws -> Void) {
         guard !busy else { return }
@@ -373,73 +677,73 @@ private struct CommunityEntry: View {
         row.communityString("caption").isEmpty ? (dream ? "A voice from the night" : "A moment from my night") : row.communityString("caption")
     }
     private var entryMedia: some View {
-        CommunityMedia(path: row.communityString("media_path"),duration: row.communitySeconds("duration"),voice: dream,remote: true,videoHeight: detail ? 338 : 220)
+        CommunityMedia(path: row.communityString("media_path"), duration: row.communitySeconds("duration"),
+                       voice: dream, remote: true, caption: postDetail ? caption : nil, liked: liked,
+                       onLike: postDetail ? { toggle("like", liked) } : nil,
+                       openPost: detail || dream ? nil : { open() })
     }
+    private var postDetail: Bool { detail && !dream }
+    private var liked: Bool { row["liked"] as? Bool ?? false }
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if detail && !dream { entryMedia }
             HStack {
-                CommunityOwner(row: row, profile: profile)
+                CommunityOwner(row: row, profile: profile, avatarSize: postDetail ? 62 : 40)
                 Spacer()
-                if owner != me {
+                if canModerate && !profile.isEmpty {
                     Button { run {
                         if followed { _ = try await app.api.rest("follows?follower_id=eq." + me + "&followed_id=eq." + owner, method: "DELETE") }
                         else { _ = try await app.api.rest("follows", method: "POST", body: ["follower_id":me,"followed_id":owner], prefer: "resolution=ignore-duplicates") }
-                    } } label: { Text(followed ? "Following" : "Follow").communityPill() }.frame(minHeight:44)
-                } else if mine {
+                    } } label: {
+                        NativeArt("feed", followed ? 5 : 4).scaledToFit().frame(width: 73, height: 34)
+                    }.accessibilityLabel(followed ? "Following" : "Follow").frame(minHeight: 44)
+                } else if mine && owner == me {
                     Button { confirm = "Delete" } label: { Text("Delete").communityPill() }.frame(minHeight:44)
                 }
             }
-            Button { open() } label: { Text(caption).font(.body).multilineTextAlignment(.leading) }.buttonStyle(.plain)
-            if !detail || dream { entryMedia }
-            HStack {
-                let liked = row["liked"] as? Bool ?? false
-                let saved = row["saved"] as? Bool ?? false
-                Button { toggle("like", liked) } label: { actionIcon("feed", liked ? 9 : 6, String(Int(row.communitySeconds("like_count")))) }.accessibilityLabel(liked ? "Remove like" : "Like")
-                if dream { Button { toggle("save", saved) } label: { actionIcon("dreams",saved ? 9 : 8, saved ? "Saved" : "Save") } }
-                else { Button { if detail { focus() } else { open() } } label: { actionIcon("feed",7,String(Int(row.communitySeconds("comment_count")))) }.accessibilityLabel("Open discussion") }
-                Spacer()
-                Button { options = true } label: { NativeArt("feed",8).scaledToFit().frame(width: 22,height: 22).frame(width: 44,height: 44) }.accessibilityLabel("More options")
-                .confirmationDialog("Entry options", isPresented: $options, titleVisibility: .hidden) {
-                    if owner == me { Button("Delete " + kind, role: .destructive) { confirm = "Delete" } }
-                    else {
-                        Button("Report " + kind) { reporting = true }
-                        Button("View author profile") { app.go("person",owner) }
-                        Button("Block author", role: .destructive) { confirm = "Block" }
-                    }
-                    Button("Cancel", role: .cancel) {}
+            if !postDetail {
+                Button { open() } label: { Text(caption).font(.body).multilineTextAlignment(.leading) }.buttonStyle(.plain)
+                entryMedia
+                HStack {
+                    let saved = row["saved"] as? Bool ?? false
+                    Button { toggle("like", liked) } label: { actionIcon("feed", liked ? 9 : 6, String(Int(row.communitySeconds("like_count")))) }.accessibilityLabel(liked ? "Remove like" : "Like")
+                    if dream { Button { toggle("save", saved) } label: { actionIcon("dreams",saved ? 9 : 8, saved ? "Saved" : "Save") } }
+                    else { Button { open() } label: { actionIcon("feed",7,String(Int(row.communitySeconds("comment_count")))) }.accessibilityLabel("Open discussion") }
+                    Spacer()
+                    Button { options = true } label: { NativeArt("feed",8).scaledToFit().frame(width: 22,height: 22).frame(width: 44,height: 44) }.accessibilityLabel("More options")
+                }.disabled(busy)
+            }
+        }.padding(.vertical, postDetail ? 0 : 6)
+        .overlay(alignment: .bottom) { if !postDetail { Divider() } }
+        .confirmationDialog("Entry options", isPresented: postDetail ? $detailOptions : $options, titleVisibility: .hidden) {
+            if owner == me { Button("Delete " + kind, role: .destructive) { confirm = "Delete" } }
+            else if canModerate {
+                Button("Report " + kind) { report(CommunityReportTarget(id: id, kind: kind, owner: owner)) }
+                if !profile.isEmpty {
+                    Button("Report author") { report(CommunityReportTarget(id: owner, kind: "profile", owner: owner)) }
+                    Button("View author profile") { app.go("person",owner) }
                 }
-            }.disabled(busy)
-        }.padding(.vertical,6).overlay(alignment: .bottom) { Divider() }
-        .confirmationDialog(confirm == "Block" ? "Block this author?" : "Delete this " + kind + "?", isPresented: Binding(get: { !confirm.isEmpty }, set: { if !$0 { confirm = "" } }), titleVisibility: .visible) {
-            if confirm == "Block" {
-                Button("Block author", role: .destructive) { run { _ = try await app.api.rest("blocks", method: "POST", body: ["owner_id":me,"blocked_id":owner], prefer: "resolution=ignore-duplicates") } }
-            } else {
-                Button("Delete " + kind, role: .destructive) { run {
-                    let result = try await app.api.rest("entries?id=eq." + id + "&owner_id=eq." + me + "&select=id", method: "DELETE", prefer: "return=representation")
-                    guard let deleted = result as? [CommunityRow], !deleted.isEmpty else { throw MiNaIssue("This entry has already been removed.") }
-                } }
+                Button("Block author", role: .destructive) { confirm = "Block" }
             }
             Button("Cancel", role: .cancel) {}
         }
-        .sheet(isPresented: $reporting) {
-            VStack(alignment: .leading, spacing: 18) {
-                Text("Report this " + kind).font(.title2.bold())
-                Picker("Reason", selection: $reason) { ForEach(["Harassment","Sexual content","Harmful content","Privacy concern","Spam","Other"],id: \.self) { Text($0) } }
-                TextField("Additional details (optional)", text: $context, axis: .vertical)
-                Button("Submit report") {
+        .confirmationDialog(confirm == "Block" ? "Block this author?" : "Delete this " + kind + "?", isPresented: Binding(get: { !confirm.isEmpty }, set: { if !$0 { confirm = "" } }), titleVisibility: .visible) {
+            if confirm == "Block" {
+                Button("Block author", role: .destructive) {
+                    guard canModerate else { return }
                     run {
-                        let key = reportID.uuidString
-                        let body = ["id":key,"reporter_id":me,"target_id":id,"target_kind":kind,"reason":String((reason + (context.isEmpty ? "" : " · " + context)).prefix(1000))]
-                        let result = try await app.api.rest("reports?select=id",method: "POST",body: body,prefer: "return=representation,resolution=ignore-duplicates")
-                        var receipt = (result as? [CommunityRow])?.first?["id"] as? String
-                        if receipt == nil { receipt = try await app.api.rows("reports?select=id&reporter_id=eq." + me + "&id=eq." + key).first?["id"] as? String }
-                        guard let receipt else { throw MiNaIssue("Your report could not be confirmed. Please retry.") }
-                        reporting = false; reportID = UUID(); context = ""; issue("Report received · " + receipt.prefix(8))
+                        let name = profile.communityString("name")
+                        try await app.blockMember(owner, name: name.isEmpty ? "Night listener" : name)
                     }
-                }.buttonStyle(.borderedProminent)
-                Button("Cancel") { reporting = false }
-            }.padding(22).frame(maxWidth:.infinity,maxHeight:.infinity,alignment:.topLeading).background { NativeArt("activity",1).ignoresSafeArea() }.disabled(busy).presentationDetents([.medium,.large])
+                }
+            } else {
+                Button("Delete " + kind, role: .destructive) { run {
+                    guard owner == me, !me.isEmpty else { throw MiNaIssue("Only the author can delete this entry.") }
+                    try await app.api.deleteEntry(id)
+                    removed()
+                } }
+            }
+            Button("Cancel", role: .cancel) {}
         }
     }
     private func actionIcon(_ group: String, _ index: Int, _ text: String) -> some View {

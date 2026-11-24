@@ -6,7 +6,7 @@ struct CompanionScreen: View {
     private let topics = ["Sleep Tips", "Emotion", "Life Advice"]
 
     var body: some View {
-        if route.name == "ai.chat" { CompanionConversation().environment(\.colorScheme, .light).preferredColorScheme(.dark) }
+        if route.name == "ai.chat" { CompanionConversation() }
         else {
             GeometryReader { geometry in
                 let width = geometry.size.width
@@ -34,7 +34,7 @@ struct CompanionScreen: View {
                     }.padding(.horizontal, 18)
                         .position(x: width / 2, y: height * 0.875)
                 }.buttonStyle(.plain)
-            }.toolbar(.hidden, for: .navigationBar).environment(\.colorScheme, .light).preferredColorScheme(.dark)
+            }.toolbar(.hidden, for: .navigationBar)
         }
     }
 }
@@ -79,7 +79,7 @@ private struct CompanionConversation: View {
     @State private var help = false
     @State private var reminder = true
     @State private var expiry: Date?
-    @State private var availability = Companion.status()
+    @State private var sharingAccepted = false
     private let prompts = ["Help me wind down", "Give me a gentle writing prompt", "Tell me a short bedtime story"]
 
     @State private var showEmoji = false
@@ -98,26 +98,25 @@ private struct CompanionConversation: View {
                     }.accessibilityLabel("About")
                 }.foregroundStyle(.white)
                 NativeArt("aiChat", 2).scaledToFit().frame(maxHeight: 138).accessibilityLabel("AI companionship")
-                if availability["available"] as? Bool == true {
-                    if remaining == 0 {
-                        Button("Begin a free 60-minute session") { confirmSession = true }
-                            .buttonStyle(.borderedProminent).disabled(busy)
-                    } else {
-                        HStack {
-                            NativeArt("aiChat", 4).frame(width: 16, height: 16)
-                            Text(String(format: "%d:%02d remaining", remaining / 60, remaining % 60)).monospacedDigit()
-                        }.font(.caption.weight(.semibold))
-                    }
+                if remaining == 0 || !sharingAccepted {
+                    Button(remaining == 0 ? "Begin a free 60-minute session" : "Resume free session") { confirmSession = true }
+                        .buttonStyle(.borderedProminent).disabled(busy)
                 } else {
-                    Text(availability["message"] as? String ?? "On-device AI is unavailable.")
-                        .font(.footnote).padding(10).background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                    HStack {
+                        NativeArt("aiChat", 4).frame(width: 16, height: 16)
+                        Text(String(format: "%d:%02d remaining", remaining / 60, remaining % 60)).monospacedDigit()
+                    }.font(.caption.weight(.semibold))
                 }
                 ScrollViewReader { proxy in
                     ScrollView {
                         VStack(spacing: 12) {
-                            if lines.isEmpty { bubble("What’s on your mind tonight?", own: false) }
+                            if lines.isEmpty {
+                                CompanionBubble(text: "What’s on your mind tonight?", own: false, timestamp: nil, isGreeting: true)
+                            }
                             ForEach(lines.indices, id: \.self) { index in
-                                bubble(lines[index]["text"] ?? "", own: lines[index]["role"] == "user").id(index)
+                                let line = lines[index]
+                                CompanionBubble(text: line["text"] ?? "", own: line["role"] == "user",
+                                                timestamp: line["created_at"]).equatable().id(index)
                             }
                         }.padding(.vertical, 8)
                     }.onChange(of: lines.count) { _ in if !lines.isEmpty { proxy.scrollTo(lines.count - 1, anchor: .bottom) } }
@@ -131,15 +130,15 @@ private struct CompanionConversation: View {
                     }
                 }.frame(maxWidth: .infinity, alignment: .leading).disabled(busy)
                 if showEmoji {
-                    HStack { ForEach(["🌙", "✨", "💚", "😴", "🌟"], id: \.self) { value in Button(value) { update(prompt + value) } } }
+                    ReactionPicker(includesHeartHands: false) { update(prompt + $0) }
                 }
                 HStack(spacing: 6) {
                     Button { showEmoji.toggle() } label: { NativeArt("aiChat", 5).frame(width: 32, height: 32) }
                         .accessibilityLabel("Choose an emoji")
-                    TextField("Share a thought…", text: Binding(get: { prompt }, set: update))
+                    TextField("Share a thought…", text: Binding(get: { prompt }, set: update)).font(ReactionPicker.textFont(for: prompt))
                     if busy { ProgressView() }
                     Button { Task { await send() } } label: { NativeArt("aiChat", 6).scaledToFit().frame(width: 64) }
-                        .disabled(busy || remaining == 0 || prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .disabled(busy || !sharingAccepted || remaining == 0 || prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         .accessibilityLabel("Send")
                 }.padding(.horizontal, 8).background(.white, in: Capsule())
             }.buttonStyle(.plain).padding(.horizontal, 16).padding(.bottom, 6)
@@ -149,9 +148,9 @@ private struct CompanionConversation: View {
                         Color.black.opacity(0.45).ignoresSafeArea()
                         VStack(spacing: 18) {
                             Text(help ? "About this conversation" : confirmSession ? "Start your session?" : "Session reminder").font(.title3.bold())
-                            Text(help ? "Apple Intelligence generates replies on this iPhone. Your conversation stays on this device." : confirmSession ? "Chat with MiNa Companion for 60 minutes at no cost." : "Less than 10 minutes remain in your session.")
+                            Text(help ? Companion.disclosure : confirmSession ? "Sessions last 60 minutes and are free. " + Companion.disclosure : "Less than 10 minutes remain in your session.")
                                 .font(.subheadline).multilineTextAlignment(.center)
-                            Button(confirmSession ? "Start free session" : "Got it") {
+                            Button(confirmSession ? "Agree and continue" : "Got it") {
                                 if confirmSession { confirmSession = false; Task { await activate() } }
                                 else if help { help = false } else { reminder = false }
                             }.frame(maxWidth: .infinity).padding(12).background(LinearGradient(colors: [.mint, .cyan], startPoint: .leading, endPoint: .trailing), in: Capsule())
@@ -167,24 +166,15 @@ private struct CompanionConversation: View {
         .background { NativeArt("aiChat", 1).ignoresSafeArea() }
         .toolbar(.hidden, for: .navigationBar)
         .onAppear {
-            availability = Companion.status()
             lines = app.state("companion.history") as? [[String: String]] ?? []
             prompt = app.state("companion.draft") as? String ?? ""
         }
         .task {
-            guard availability["available"] as? Bool == true else { return }
             do {
                 let rows = try await app.api.rows("companion_sessions?select=expires_at&owner_id=eq." + app.api.userID)
                 if expiry == nil { expiry = expiration(rows.first?["expires_at"]) }
             } catch { if !Task.isCancelled { failure = error.localizedDescription } }
         }
-    }
-
-    private func bubble(_ text: String, own: Bool) -> some View {
-        Text(text).padding(12)
-            .background(own ? Color(red: 0.41, green: 0.88, blue: 0.8) : .white.opacity(0.92), in: RoundedRectangle(cornerRadius: 12))
-            .padding(own ? .leading : .trailing, 40)
-            .frame(maxWidth: .infinity, alignment: own ? .trailing : .leading)
     }
 
     private func expiration(_ value: Any?) -> Date? {
@@ -209,6 +199,7 @@ private struct CompanionConversation: View {
             guard let end = expiration(result) else {
                 throw MiNaIssue("The session expiration could not be read.")
             }
+            sharingAccepted = true
             expiry = end
             reminder = true
             failure = ""
@@ -217,20 +208,47 @@ private struct CompanionConversation: View {
 
     private func send() async {
         let text = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !busy, !text.isEmpty, let expiry, expiry > Date() else { return }
+        guard sharingAccepted, !busy, !text.isEmpty, let expiry, expiry > Date() else { return }
         let owner = app.api.userID
+        let sentAt = Date().ISO8601Format()
         busy = true
         defer { busy = false }
         do {
-            let answer = try await Companion.reply(["prompt": text, "history": Array(lines.suffix(8))])
+            let reply = try await app.api.companionReply(prompt: text, history: lines)
             guard app.signedIn, app.api.userID == owner else { return }
-            guard let reply = answer["text"], !reply.isEmpty else { throw MiNaIssue("No reply arrived. Try again.") }
-            let updated = lines + [["role": "user", "text": text], ["role": "assistant", "text": reply]]
+            let updated = lines + [["role": "user", "text": text, "created_at": sentAt],
+                                   ["role": "assistant", "text": reply, "created_at": Date().ISO8601Format()]]
             let draft = prompt == text ? "" : prompt
             try app.saveChanges(["companion.history": updated, "companion.draft": draft])
             lines = updated
             prompt = draft
             failure = ""
         } catch { failure = error.localizedDescription }
+    }
+}
+
+private struct CompanionBubble: View, Equatable {
+    let text: String
+    let own: Bool
+    let timestamp: String?
+    var isGreeting = false
+
+    var body: some View {
+        VStack(alignment: own ? .trailing : .leading, spacing: 5) {
+            Companion.messageText(text).accessibilityLabel(Text(verbatim: text))
+            if !isGreeting {
+                Group {
+                    if let timestamp, let date = try? Date(timestamp, strategy: .iso8601) {
+                        Text(date.formatted(date: .abbreviated, time: .shortened))
+                    } else {
+                        Text("Time unavailable")
+                    }
+                }.font(.caption2).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("companion.message.timestamp")
+            }
+        }.padding(12)
+            .background(own ? Color(red: 0.41, green: 0.88, blue: 0.8) : .white.opacity(0.92), in: RoundedRectangle(cornerRadius: 12))
+            .padding(own ? .leading : .trailing, 40)
+            .frame(maxWidth: .infinity, alignment: own ? .trailing : .leading)
     }
 }

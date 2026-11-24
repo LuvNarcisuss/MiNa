@@ -1,0 +1,275 @@
+{
+  "collection": "night-journal-v1",
+  "people": [
+    {
+      "key": "ivy",
+      "name": "Ivy Hollow",
+      "photo": "ivy-portrait-2.jpg",
+      "credit": "Marlon Alves",
+      "source": "https://www.pexels.com/photo/girl-with-make-up-and-long-brown-hair-10125599/",
+      "bio": "Fictional character in the MiNa Night Journal. Collects the sounds between the last train and the first bird.",
+      "sha256": "4c16caa7a17081928d571235d3ccf32aa9eda37edd4bbbc29fd4d2b8f198fe82"
+    },
+    {
+      "key": "bea",
+      "name": "Bea Marlow",
+      "photo": "bea-portrait-2.jpg",
+      "credit": "Israel Torres",
+      "source": "https://www.pexels.com/photo/portrait-of-woman-with-long-black-hair-20060250/",
+      "bio": "Fictional character in the MiNa Night Journal. Keeps a little notebook of things the sea leaves behind.",
+      "sha256": "bce9f5468ba010192d225c46d92910e2ccc2d772529fe624cb082edbf16b4de8"
+    },
+    {
+      "key": "wren",
+      "name": "Wren Vale",
+      "photo": "wren-portrait-2.jpg",
+      "credit": "León Ramisan",
+      "source": "https://www.pexels.com/photo/portrait-of-brunette-woman-20439470/",
+      "bio": "Fictional character in the MiNa Night Journal. Finds a tune in anything that rings.",
+      "sha256": "494b69f43c3c03db31954466f0c51a339286e8f7a54c4562d6d5b492731c235b"
+    },
+    {
+      "key": "june",
+      "name": "June Alder",
+      "photo": "june-portrait-2.jpg",
+      "credit": "Antonio Friedemann",
+      "source": "https://www.pexels.com/photo/portrait-of-a-woman-with-long-hair-8017784/",
+      "bio": "Fictional character in the MiNa Night Journal. Likes rain on glass and the last window still lit on a street.",
+      "sha256": "81ef941d427f5135003973d0d2dab98e0a81a404dc865aaef51ad82210e4c068"
+    },
+    {
+      "key": "clea",
+      "name": "Clea Fern",
+      "photo": "clea-portrait-2.jpg",
+      "credit": "Alexander Krivitskiy",
+      "source": "https://www.pexels.com/photo/woman-with-hands-on-hair-15389889/",
+      "bio": "Fictional character in the MiNa Night Journal. Leaves little coast walks here for anyone far from the water.",
+      "sha256": "bab73fadbeac845dd98806ee355c83336b6ca1d553d0fd6dd9d4a8c358f8e9b9"
+    },
+    {
+      "key": "nell",
+      "name": "Nell Rowan",
+      "photo": "nell-portrait-2.jpg",
+      "credit": "Jorge Fakhouri Filho",
+      "source": "https://www.pexels.com/photo/woman-with-long-hair-2701571/",
+      "bio": "Fictional character in the MiNa Night Journal. Writes field notes on the way clouds cross the moon.",
+      "sha256": "f8220e407e62ea2b54b29f0179ec0863e09e6ffef3d011b3f40c96c0009b0237"
+    },
+    {
+      "key": "iris",
+      "name": "Iris Finch",
+      "photo": "iris-portrait-2.jpg",
+      "credit": "Heber Vazquez",
+      "source": "https://www.pexels.com/photo/portrait-of-a-pretty-brunette-16153366/",
+      "bio": "Fictional character in the MiNa Night Journal. Folds maps into paper boats and follows them in dreams.",
+      "sha256": "174b7b4e9e176345de84cd940a90df36b1c84d5ad8be2476509e38c88b96c9b2"
+    },
+    {
+      "key": "thea",
+      "name": "Thea Linden",
+      "photo": "thea-portrait-2.jpg",
+      "credit": "Rovshan Nazirli",
+      "source": "https://www.pexels.com/photo/portrait-of-brunette-woman-18054128/",
+      "bio": "Fictional character in the MiNa Night Journal. Always remembers the lights from the ferry home.",
+      "sha256": "b02ced11942a328596713f5d78cbd3b611b611e4461f2900827c347235d70da9"
+    }
+  ],
+  "entries": [
+    {
+      "key": "station",
+      "author": "ivy",
+      "kind": "dream",
+      "caption": "The station with no clocks",
+      "narration": "At the last stop, the conductor gave me a paper ticket with a leaf pressed inside. The platform had no clocks. Every bench faced a little orchard. I sat there until a pear dropped into my coat pocket. That was my train home.",
+      "replies": [
+        [
+          "thea",
+          "A pear instead of a departure bell. I hope that train takes the long way."
+        ],
+        [
+          "iris",
+          "Keeping the leaf ticket is my favorite part."
+        ]
+      ]
+    },
+    {
+      "key": "rain",
+      "author": "june",
+      "kind": "post",
+      "caption": "Watching the streetlights melt into the rain. Which color do you notice first?",
+      "replies": [
+        [
+          "ivy",
+          "The little gold one that disappears behind the next drop."
+        ]
+      ]
+    },
+    {
+      "key": "shell",
+      "author": "bea",
+      "kind": "dream",
+      "caption": "A shell with a front door",
+      "narration": "There was a blue door in the side of a seashell. Inside, someone had put a kettle on. We drank tea at a table small enough to fit between two waves. When I woke up, I could almost hear the cups settling back into their saucers.",
+      "replies": [
+        [
+          "wren",
+          "Two cups on a tiny table. That detail stayed with me."
+        ],
+        [
+          "clea",
+          "I would love to know what kind of tea the sea makes."
+        ]
+      ]
+    },
+    {
+      "key": "tide",
+      "author": "clea",
+      "kind": "post",
+      "caption": "Twelve seconds at the edge of the water. The foam draws a different little map each time.",
+      "replies": [
+        [
+          "bea",
+          "That thin bright line just before the water retreats."
+        ],
+        [
+          "thea",
+          "I watched twice for the second wave."
+        ]
+      ]
+    },
+    {
+      "key": "stairs",
+      "author": "wren",
+      "kind": "dream",
+      "caption": "The staircase played a tune",
+      "narration": "The stairs in my dream made a different note with every step. I tried to climb quietly, but the house hummed along anyway. Halfway up I sat down. A blackbird on the banister finished the tune for me.",
+      "replies": [
+        [
+          "june",
+          "I can picture the bird waiting for its cue."
+        ]
+      ]
+    },
+    {
+      "key": "moon",
+      "author": "nell",
+      "kind": "post",
+      "caption": "A cloud borrowed the moon for a moment. Watch the bright edge on the right.",
+      "replies": [
+        [
+          "wren",
+          "The cloud looks like a curtain lifting."
+        ],
+        [
+          "iris",
+          "The little pause before the moon comes back is lovely."
+        ]
+      ]
+    },
+    {
+      "key": "paper",
+      "author": "iris",
+      "kind": "dream",
+      "caption": "Postcards in a paper boat",
+      "narration": "I folded an old street map into a boat and set it on a puddle. It came back carrying a postcard. On the front was my own window, lit from inside. On the back, in very small letters, someone had written, You can take the slow way.",
+      "replies": [
+        [
+          "nell",
+          "I would pin that postcard over my desk."
+        ]
+      ]
+    },
+    {
+      "key": "ferry",
+      "author": "thea",
+      "kind": "dream",
+      "caption": "The ferry that carried stars",
+      "narration": "The last ferry crossed a lake so still that the stars seemed to be floating on it. The deckhand scooped one up with a teacup. He set it on the railing, where it gave us just enough light to read our books all the way across.",
+      "replies": [
+        [
+          "ivy",
+          "Just enough light for a book sounds perfect."
+        ],
+        [
+          "bea",
+          "I am still thinking about that teacup."
+        ]
+      ]
+    }
+  ],
+  "rooms": [
+    {
+      "key": "last-stop",
+      "host": "ivy",
+      "title": "The Last Stop",
+      "topic": "Night Journal · Leave a line about the quietest part of your day.",
+      "cover": "moon-seat",
+      "notes": [
+        [
+          "ivy",
+          "Tonight’s prompt: what small sound tells you the day is over?"
+        ],
+        [
+          "june",
+          "The click when the kitchen light goes out."
+        ],
+        [
+          "thea",
+          "For me it is the ferry bell carrying over the water."
+        ]
+      ]
+    },
+    {
+      "key": "shore",
+      "host": "bea",
+      "title": "Low Tide Letters",
+      "topic": "Night Journal · A place to trade little notes from the shore.",
+      "cover": "moonlit-sea",
+      "notes": [
+        [
+          "bea",
+          "If you could leave a note in a shell, what would it say?"
+        ],
+        [
+          "clea",
+          "The tide will bring you another clean page."
+        ],
+        [
+          "iris",
+          "Mine would have a tiny map folded inside."
+        ]
+      ]
+    },
+    {
+      "key": "window",
+      "host": "wren",
+      "title": "The Humming Window",
+      "topic": "Night Journal · Share a tune, a rain sound or a bedtime ritual.",
+      "cover": "star-pillow",
+      "notes": [
+        [
+          "wren",
+          "One sound for a bedtime playlist: a spoon tapping the rim of a cup."
+        ],
+        [
+          "nell",
+          "A window latch, followed by the first few drops of rain."
+        ]
+      ]
+    }
+  ],
+  "video_sources": {
+    "tide": {
+      "credit": "Micaela Alejandro",
+      "source": "https://www.pexels.com/video/waves-reaching-the-shore-on-a-sandy-beach-10758010/"
+    },
+    "rain": {
+      "credit": "Melike B",
+      "source": "https://www.pexels.com/video/traffic-seen-through-window-with-water-drops-on-it-9931014/"
+    },
+    "moon": {
+      "credit": "Tom Fisk",
+      "source": "https://www.pexels.com/video/a-dark-clouds-over-shadowing-the-full-moon-3579494/"
+    }
+  }
+}

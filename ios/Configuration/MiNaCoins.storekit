@@ -1,0 +1,120 @@
+{
+  "identifier": "DE2A9ECF-28C5-441B-AA52-CB0E0F465A5C",
+  "nonRenewingSubscriptions": [],
+  "products": [
+    {
+      "displayPrice": "0.99",
+      "familyShareable": false,
+      "internalID": "66D474E6-6056-46CD-832F-CFE7400988E6",
+      "localizations": [
+        {
+          "description": "Add 400 star coins to your MiNa wallet.",
+          "displayName": "400 Star Coins",
+          "locale": "en_US"
+        }
+      ],
+      "productID": "iukawygoozctrvri",
+      "referenceName": "400 Star Coins",
+      "type": "Consumable"
+    },
+    {
+      "displayPrice": "1.99",
+      "familyShareable": false,
+      "internalID": "CC42BAE8-ACFD-484F-9F89-882C3D32B739",
+      "localizations": [
+        {
+          "description": "Add 800 star coins to your MiNa wallet.",
+          "displayName": "800 Star Coins",
+          "locale": "en_US"
+        }
+      ],
+      "productID": "iuksdwimsbrhwuza",
+      "referenceName": "800 Star Coins",
+      "type": "Consumable"
+    },
+    {
+      "displayPrice": "4.99",
+      "familyShareable": false,
+      "internalID": "C5E56EDA-A4FE-47E5-9E77-48B960849E99",
+      "localizations": [
+        {
+          "description": "Add 2,450 star coins to your MiNa wallet.",
+          "displayName": "2,450 Star Coins",
+          "locale": "en_US"
+        }
+      ],
+      "productID": "kbuujljqmlnqmmpp",
+      "referenceName": "2,450 Star Coins",
+      "type": "Consumable"
+    },
+    {
+      "displayPrice": "9.99",
+      "familyShareable": false,
+      "internalID": "7F2B34EE-557D-4BDE-B5BA-BC92123F12F1",
+      "localizations": [
+        {
+          "description": "Add 5,150 star coins to your MiNa wallet.",
+          "displayName": "5,150 Star Coins",
+          "locale": "en_US"
+        }
+      ],
+      "productID": "yyzthxzkykuwreyt",
+      "referenceName": "5,150 Star Coins",
+      "type": "Consumable"
+    },
+    {
+      "displayPrice": "19.99",
+      "familyShareable": false,
+      "internalID": "04918A98-4FCC-415A-9713-7B79569D2ED7",
+      "localizations": [
+        {
+          "description": "Add 10,800 star coins to your MiNa wallet.",
+          "displayName": "10,800 Star Coins",
+          "locale": "en_US"
+        }
+      ],
+      "productID": "mxvqqvbrxagzhpzd",
+      "referenceName": "10,800 Star Coins",
+      "type": "Consumable"
+    },
+    {
+      "displayPrice": "49.99",
+      "familyShareable": false,
+      "internalID": "5EEEC4FC-A007-45D3-ABB4-E725C23669E7",
+      "localizations": [
+        {
+          "description": "Add 29,400 star coins to your MiNa wallet.",
+          "displayName": "29,400 Star Coins",
+          "locale": "en_US"
+        }
+      ],
+      "productID": "cbdqrfufpxoocyou",
+      "referenceName": "29,400 Star Coins",
+      "type": "Consumable"
+    },
+    {
+      "displayPrice": "99.99",
+      "familyShareable": false,
+      "internalID": "0BD0E651-EB1B-42A3-A66F-7F70B2BBC34F",
+      "localizations": [
+        {
+          "description": "Add 63,700 star coins to your MiNa wallet.",
+          "displayName": "63,700 Star Coins",
+          "locale": "en_US"
+        }
+      ],
+      "productID": "ezcsvqkqboqagspr",
+      "referenceName": "63,700 Star Coins",
+      "type": "Consumable"
+    }
+  ],
+  "settings": {
+    "_locale": "en_US",
+    "_storefront": "USA"
+  },
+  "subscriptionGroups": [],
+  "version": {
+    "major": 3,
+    "minor": 0
+  }
+}

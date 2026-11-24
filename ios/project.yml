@@ -2,6 +2,8 @@ name: MiNa
 options:
   deploymentTarget:
     iOS: '16.0'
+fileGroups:
+  - Configuration
 settings:
   base:
     SWIFT_VERSION: '5.0'
@@ -22,6 +24,10 @@ targets:
   MiNa:
     type: application
     platform: iOS
+    attributes:
+      SystemCapabilities:
+        com.apple.InAppPurchase:
+          enabled: 1
     dependencies:
       - package: WebRTC
     sources:

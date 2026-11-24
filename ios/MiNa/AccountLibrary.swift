@@ -2,7 +2,11 @@ import Foundation
 
 struct MiNaIssue: LocalizedError {
     let message: String
-    init(_ message: String) { self.message = message }
+    let code: String?
+    init(_ message: String, code: String? = nil) {
+        self.message = message
+        self.code = code
+    }
     var errorDescription: String? { message }
 }
 

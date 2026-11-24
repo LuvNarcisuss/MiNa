@@ -1,4 +1,3 @@
-import StoreKit
 import SwiftUI
 
 struct EconomyScreen: View {
@@ -26,28 +25,7 @@ struct EconomyScreen: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                if route.name == "wallet" {
-                    HStack {
-                        VStack(alignment: .leading) {
-                            Text("My balance").font(.headline)
-                            if let balance { Text(balance.formatted()).font(.largeTitle.bold().monospacedDigit()) }
-                            else if loaded { Text("Balance unavailable").font(.subheadline) }
-                            Text("Star coins").font(.caption)
-                        }
-                        Spacer()
-                        NativeArt("wallet", 3).scaledToFit().frame(width: 105)
-                    }.padding(.vertical, 12)
-                    Text("Coin packages").font(.headline)
-                    VStack(alignment: .leading,spacing: 12) {
-                        Text(SKPaymentQueue.canMakePayments() ? "Coin packages are not available yet." : "Purchases are disabled on this iPhone.")
-                            .font(.callout)
-                        Button("Refresh balance") { Task { await load() } }.buttonStyle(.bordered)
-                    }.padding().frame(maxWidth: .infinity,alignment: .leading).background(.white.opacity(0.9),in: RoundedRectangle(cornerRadius: 12))
-                    Button { app.go("store.bag") } label: {
-                        HStack { Text("My backpack"); Spacer(); Image(systemName:"chevron.right").font(.caption) }.padding().contentShape(Rectangle())
-                    }.background(.white,in: RoundedRectangle(cornerRadius: 12))
-
-                } else if route.name == "level" {
+                if route.name == "level" {
                     if let current = level["current_level"] as? Int, let contribution = level["contribution"] as? Int {
                         VStack(alignment: .leading,spacing: 7) {
                             Text("Gift contribution").font(.caption)
@@ -82,10 +60,10 @@ struct EconomyScreen: View {
                 if !notice.isEmpty { Text(notice); Button("Refresh") { Task { await load() } } }
             }.padding().frame(maxWidth: .infinity, alignment: .leading)
         }
-        .navigationTitle(route.name == "wallet" ? "My wallet" : route.name == "level" ? "My level" : "Store")
+        .navigationTitle(route.name == "level" ? "My level" : "Store")
         .navigationBarTitleDisplayMode(.inline)
-        .preferredColorScheme(.light)
-        .background { AccountBackdrop(group: route.name == "wallet" ? "wallet" : route.name == "level" ? "level" : "store") }
+
+        .background { AccountBackdrop(group: route.name == "level" ? "level" : "store") }
         .task(id: route) {
             await load()
             if let id = returnGiftID, app.route == route, !Task.isCancelled {

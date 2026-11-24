@@ -1,0 +1,3 @@
+MiNa Reactions uses nine glyphs from OpenMoji 16.0.0 by the OpenMoji contributors at HfG Schwaebisch Gmuend. The font was subsetted and renamed for MiNa. The artwork and this subset are licensed under Creative Commons Attribution-ShareAlike 4.0 International.
+Source: https://github.com/hfg-gmuend/openmoji/tree/16.0.0/font/OpenMoji-color-sbix
+License: https://creativecommons.org/licenses/by-sa/4.0/

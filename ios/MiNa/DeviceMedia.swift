@@ -16,7 +16,7 @@ final class DeviceMedia: NSObject, PHPickerViewControllerDelegate, UIDocumentPic
     private var player: AVAudioPlayer?
     private var playerID: String?
     private var previousCallCategory: (AVAudioSession.Category, AVAudioSession.Mode, AVAudioSession.CategoryOptions)?
-    private var pendingPermission = false
+    private var recordingRequest: (id: UUID, granted: Bool, completion: Completion)?
     private var kind = ""
     private var pickerReply: Completion?
     private var mediaDirectory: URL { AccountLibrary.library.appendingPathComponent("Media", isDirectory: true) }
@@ -27,8 +27,10 @@ final class DeviceMedia: NSObject, PHPickerViewControllerDelegate, UIDocumentPic
         super.init()
         NotificationCenter.default.addObserver(self, selector: #selector(interruption(_:)),
             name: AVAudioSession.interruptionNotification, object: audio)
-        NotificationCenter.default.addObserver(self, selector: #selector(background),
+        NotificationCenter.default.addObserver(self, selector: #selector(enteredBackground),
             name: UIApplication.didEnterBackgroundNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(startAuthorizedRecordingIfActive),
+            name: UIApplication.didBecomeActiveNotification, object: nil)
     }
 
     @objc private func interruption(_ note: Notification) {
@@ -37,7 +39,12 @@ final class DeviceMedia: NSObject, PHPickerViewControllerDelegate, UIDocumentPic
         DispatchQueue.main.async { self.background() }
     }
 
-    @objc private func background() {
+    @objc private func enteredBackground() {
+        cancelPendingRecording()
+        background()
+    }
+
+    private func background() {
         if recorder != nil { _ = try? finishRecording() }
         stopPlayback()
     }
@@ -47,10 +54,17 @@ final class DeviceMedia: NSObject, PHPickerViewControllerDelegate, UIDocumentPic
         return mediaDirectory.appendingPathComponent(id, isDirectory: true)
     }
 
+    func storedAsset(_ id: String) throws -> URL? {
+        do {
+            let choices = try fs.contentsOfDirectory(at: directory(id), includingPropertiesForKeys: nil)
+            return choices.first { $0.deletingPathExtension().lastPathComponent == "asset" }
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile || error.code == .fileNoSuchFile {
+            return nil
+        }
+    }
+
     private func asset(_ id: String) throws -> URL {
-        let choices = try fs.contentsOfDirectory(at: directory(id), includingPropertiesForKeys: nil)
-        guard let url = choices.first(where: { $0.deletingPathExtension().lastPathComponent == "asset" })
-        else { throw MiNaIssue("This media item is no longer on this device.") }
+        guard let url = try storedAsset(id) else { throw MiNaIssue("This media item is no longer on this device.") }
         return url
     }
 
@@ -75,12 +89,12 @@ final class DeviceMedia: NSObject, PHPickerViewControllerDelegate, UIDocumentPic
     }
 
     func prepareAccountChange() throws {
-        guard pickerReply == nil, !pendingPermission else { throw MiNaIssue("Finish the media selection first.") }
+        guard pickerReply == nil, recordingRequest == nil else { throw MiNaIssue("Finish the media selection first.") }
         background()
     }
 
     func clear() throws {
-        guard pickerReply == nil, !pendingPermission else { throw MiNaIssue("Finish the media selection first.") }
+        guard pickerReply == nil, recordingRequest == nil else { throw MiNaIssue("Finish the media selection first.") }
         background()
         if fs.fileExists(atPath: AccountLibrary.library.path) {
             try fs.removeItem(at: AccountLibrary.library)
@@ -195,19 +209,41 @@ final class DeviceMedia: NSObject, PHPickerViewControllerDelegate, UIDocumentPic
     }
 
     func beginRecording(_ completion: @escaping Completion) {
-        guard recorder == nil, !pendingPermission else {
+        guard recorder == nil, recordingRequest == nil else {
             completion(.failure(MiNaIssue("A recording is already in progress."))); return
         }
-        pendingPermission = true
+        let id = UUID()
+        recordingRequest = (id, false, completion)
         audio.requestRecordPermission { granted in
             DispatchQueue.main.async {
-                self.pendingPermission = false
-                guard granted, UIApplication.shared.applicationState == .active else {
+                guard self.recordingRequest?.id == id else { return }
+                guard granted else {
+                    self.recordingRequest = nil
                     completion(.failure(MiNaIssue("Allow microphone access in Settings to record a dream."))); return
                 }
-                completion(Result { try self.startTake() })
+                self.recordingRequest?.granted = true
+                self.startAuthorizedRecordingIfActive()
             }
         }
+    }
+
+    @objc private func startAuthorizedRecordingIfActive() {
+        guard let request = recordingRequest, request.granted else { return }
+        switch UIApplication.shared.applicationState {
+        case .active:
+            recordingRequest = nil
+            request.completion(Result { try startTake() })
+        case .background:
+            cancelPendingRecording()
+        default:
+            break
+        }
+    }
+
+    func cancelPendingRecording() {
+        guard let request = recordingRequest else { return }
+        recordingRequest = nil
+        request.completion(.failure(MiNaIssue("Recording was interrupted before it started. Tap to record again.")))
     }
 
     private func startTake() throws -> Payload {

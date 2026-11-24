@@ -58,6 +58,9 @@ extension View {
                     let visible = geo.frame(in: .global)
                     let topInset = max(geo.safeAreaInsets.top,min(window?.safeAreaInsets.top ?? 0,max(0,visible.minY)))
                     let bottomInset = max(geo.safeAreaInsets.bottom,min(window?.safeAreaInsets.bottom ?? 0,max(0,(window?.bounds.maxY ?? visible.maxY) - visible.maxY)))
+                    let giftBottomInset = item == .gift ? window.map {
+                        max(0, visible.maxY - ($0.bounds.maxY - $0.safeAreaInsets.bottom))
+                    } ?? geo.safeAreaInsets.bottom : 0
                     ZStack(alignment: item == .music ? .trailing : .bottom) {
                         Color.black.opacity(0.46).ignoresSafeArea().onTapGesture { selection.wrappedValue = nil }.accessibilityHidden(true)
                         VStack(alignment: .leading,spacing: 0) {
@@ -79,7 +82,7 @@ extension View {
                             // Extend only the paint into system areas. The panel's controls keep their safe-area frame.
                             GeometryReader { bounds in
                                 let top = item == .music ? topInset : 0
-                                let bottom = bottomInset
+                                let bottom = bottomInset + giftBottomInset
                                 ZStack {
                                     Color(red: 0.91,green: 0.99,blue: 0.99)
                                     NativeArt(item == .ranking ? "audience" : item.artwork,1)
@@ -89,6 +92,7 @@ extension View {
                                 .offset(y: -top)
                             }.allowsHitTesting(false)
                         }
+                        .padding(.bottom, giftBottomInset)
                         .accessibilityAddTraits(.isModal).accessibilityAction(.escape) { selection.wrappedValue = nil }
                     }.frame(width: geo.size.width,height: geo.size.height)
                 }.environment(\.colorScheme,.light)
@@ -142,8 +146,11 @@ struct RoomStageFrame<Bottom: View>: View {
     var audience: Int?
     var runtime: Int?
     var seats: [Int:String] = [:]
+    var hostPortrait: URL? = nil
     var portraits: [Int:URL] = [:]
-    var gifts = true
+    var safetyMenu: AnyView?
+    var participants: [RoomParticipant] = []
+    var selectParticipant: ((String) -> Void)?
     let open: (RoomPanel,Int) -> Void
     @ViewBuilder let bottom: () -> Bottom
     func tool(_ label: String,_ index: Int,_ panel: RoomPanel) -> some View {
@@ -155,63 +162,91 @@ struct RoomStageFrame<Bottom: View>: View {
     }
     var body: some View {
         GeometryReader { geo in
-            ScrollView {
-                VStack(alignment: .leading,spacing: 12) {
-                    HStack(spacing: 1) {
-                        Button { open(.host,0) } label: {
-                            HStack(spacing: 8) {
-                                RoomArtwork(cover).scaledToFill().frame(width: 40,height: 40).clipShape(Circle())
-                                VStack(alignment: .leading,spacing: 3) { Text(title).font(.subheadline.bold()).lineLimit(2); Text(hostStatus).font(.caption).foregroundColor(.white.opacity(0.74)) }
-                            }
-                        }
-                        Spacer(minLength: 0)
-                        Button { open(.audience,1) } label: { HStack(spacing: 2) { NativeArt("room",3).frame(width: 13,height: 13); if let audience { Text("\(audience)").font(.caption) } }.padding(6).background(.white.opacity(0.2),in: Capsule()).frame(minWidth: 44,minHeight: 44) }.accessibilityLabel("Room audience")
-                        tool("Invite friends",2,.share); tool("Leave room",1,.exit)
-                    }
-                    HStack { NativeArt("room",4).frame(width: 18,height: 18); Text(topic).font(.caption); Spacer() }
-                    HStack {
-                        Button { open(.ranking,1) } label: { NativeArt("room",14).frame(width: 33,height: 24).frame(width: 44,height: 44,alignment: .leading) }.accessibilityLabel("Rankings")
-                        Spacer()
-                        if let runtime { HStack { NativeArt("room",13).frame(width: 14,height: 14); Text("\(runtime) min").font(.caption) }.padding(6).background(.white.opacity(0.2),in: Capsule()) }
-                    }
+            let compact = geo.size.height < 680
+            let spacing: CGFloat = compact ? 3 : 7
+            let hostSize: CGFloat = compact ? 56 : 76
+            let seatSize: CGFloat = compact ? 36 : 46
+            VStack(alignment: .leading, spacing: spacing) {
+                HStack(spacing: 1) {
                     Button { open(.host,0) } label: {
-                        VStack(spacing: 4) {
-                            ZStack { Circle().fill(.teal.opacity(0.45))
-                                if let portrait = portraits[0] { AsyncImage(url: portrait) { image in image.resizable().scaledToFill() } placeholder: { RoomArtwork(cover) }.frame(width: 75,height: 75).clipShape(Circle()) }
-                                else { RoomArtwork(cover).scaledToFill().frame(width: 75,height: 75).clipShape(Circle()) }
-                            }.frame(width: 94,height: 94)
-                            Text(host).font(.headline); Text(hostStatus).font(.caption)
-                        }.frame(maxWidth: .infinity)
-                    }
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible()),count: 4),spacing: 16) {
-                        ForEach(1...8,id: \.self) { seat in
-                            Button { open(.mic,seat) } label: { VStack(spacing: 5) {
-                                ZStack {
-                                    Circle().fill(.white.opacity(0.16)).overlay { Circle().stroke(.white.opacity(0.20)) }
-                                    if let portrait = portraits[seat] { AsyncImage(url: portrait) { image in image.resizable().scaledToFill() } placeholder: { Color.clear }.clipShape(Circle()) }
-                                    else if let name = seats[seat] { Text(String(name.prefix(2))).bold() }
-                                    else { NativeArt("room",7).scaledToFit().padding(13) }
-                                }.frame(width: 49,height: 49)
-                                Text(seats[seat] ?? "Mic \(seat)").font(.caption).lineLimit(1)
-                            } }.accessibilityLabel(seats[seat] ?? "Microphone seat \(seat)")
+                        HStack(spacing: 8) {
+                            RoomArtwork(cover).scaledToFill().frame(width: 40,height: 40).clipShape(Circle())
+                            VStack(alignment: .leading,spacing: 3) { Text(title).font(.subheadline.bold()).lineLimit(2); Text(hostStatus).font(.caption).foregroundColor(.white.opacity(0.74)) }
                         }
                     }
-                    Spacer(minLength: 8)
-                    bottom()
-                    HStack(spacing: 4) {
-                        Button { open(.chat,1) } label: {
-                            HStack { NativeArt("room",18).frame(width: 21,height: 21); Text("Room chat").font(.caption); Spacer(); NativeArt("room",20).scaledToFit().frame(width: 36,height: 29) }
-                                .padding(.horizontal,7).frame(height: 36).background(.white.opacity(0.23),in: Capsule())
-                        }.accessibilityLabel("Room chat")
-                        tool("Microphone settings",15,.mic); tool("Choose a gift",19,.gift).disabled(!gifts); tool("Music on demand",16,.music)
+                    Spacer(minLength: 0)
+                    Button { open(.audience,1) } label: { HStack(spacing: 2) { NativeArt("room",3).frame(width: 13,height: 13); if let audience { Text("\(audience)").font(.caption) } }.padding(6).background(.white.opacity(0.2),in: Capsule()).frame(minWidth: 44,minHeight: 44) }.accessibilityLabel("Room audience")
+                    tool("Invite friends",2,.share); tool("Leave room",1,.exit)
+                }
+                HStack { NativeArt("room",4).frame(width: 18,height: 18); Text(topic).font(.caption).lineLimit(1); Spacer() }
+                HStack {
+                    Button { open(.ranking,1) } label: { NativeArt("room",14).frame(width: 33,height: 24).frame(width: 44,height: 44,alignment: .leading) }.accessibilityLabel("Rankings")
+                    Spacer()
+                    if let safetyMenu { safetyMenu }
+                    if let runtime { HStack { NativeArt("room",13).frame(width: 14,height: 14); Text("\(runtime) min").font(.caption) }.padding(6).background(.white.opacity(0.2),in: Capsule()) }
+                }
+                Button { open(.host,0) } label: {
+                    VStack(spacing: 4) {
+                        ZStack { Circle().fill(.teal.opacity(0.45))
+                            if let portrait = hostPortrait { AsyncImage(url: portrait) { image in image.resizable().scaledToFill() } placeholder: { RoomArtwork(cover) }.frame(width: hostSize - 10,height: hostSize - 10).clipShape(Circle()) }
+                            else { RoomArtwork(cover).scaledToFill().frame(width: hostSize - 10,height: hostSize - 10).clipShape(Circle()) }
+                        }.frame(width: hostSize,height: hostSize)
+                        Text(host).font(.headline).lineLimit(1); Text(hostStatus).font(.caption).lineLimit(1)
+                    }.frame(maxWidth: .infinity)
+                }
+                if !participants.isEmpty {
+                    Text("Listeners & contributors").font(.subheadline.bold())
+                    HStack(alignment: .top, spacing: 4) {
+                        ForEach(participants.prefix(4)) { person in
+                            Button { selectParticipant?(person.id) } label: {
+                                VStack(spacing: 3) {
+                                    ZStack {
+                                        Circle().fill(.white.opacity(0.18))
+                                        Text(String(person.name.prefix(1))).bold()
+                                        if let url = person.portrait {
+                                            AsyncImage(url: url) { $0.resizable().scaledToFill() } placeholder: { Color.clear }
+                                        }
+                                    }.frame(width: compact ? 28 : 34, height: compact ? 28 : 34).clipShape(Circle())
+                                    Text(person.name).font(.caption.bold()).lineLimit(1)
+                                    Text(person.role).font(.caption2).lineLimit(1).minimumScaleFactor(0.8).foregroundStyle(.white.opacity(0.82))
+                                }.frame(maxWidth: .infinity)
+                            }.buttonStyle(.plain).accessibilityLabel(person.name + ", " + person.role)
+                        }
                     }
-                }.padding(.horizontal,18).padding(.vertical,8).frame(minHeight: geo.size.height,alignment: .top)
-            }
+                }
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible()),count: 4),spacing: spacing) {
+                    ForEach(1...8,id: \.self) { seat in
+                        Button { open(.mic,seat) } label: { VStack(spacing: 5) {
+                            ZStack {
+                                Circle().fill(.white.opacity(0.16)).overlay { Circle().stroke(.white.opacity(0.20)) }
+                                if let portrait = portraits[seat] { AsyncImage(url: portrait) { image in image.resizable().scaledToFill() } placeholder: { Color.clear }.clipShape(Circle()) }
+                                else if let name = seats[seat] { Text(String(name.prefix(2))).bold() }
+                                else { NativeArt("room",7).scaledToFit().padding(13) }
+                            }.frame(width: seatSize,height: seatSize)
+                            Text(seats[seat] ?? "Mic \(seat)").font(.caption).lineLimit(1)
+                        } }.accessibilityLabel(seats[seat] ?? "Microphone seat \(seat)")
+                    }
+                }
+                GeometryReader { space in
+                    bottom().frame(maxWidth: .infinity, maxHeight: space.size.height, alignment: .bottomLeading)
+                }
+                .frame(minHeight: selectParticipant == nil ? 0 : 90)
+                .clipped()
+                HStack(spacing: 4) {
+                    Button { open(.chat,1) } label: {
+                        HStack { NativeArt("room",18).frame(width: 21,height: 21); Text("Room chat").font(.caption); Spacer(); NativeArt("room",20).scaledToFit().frame(width: 36,height: 29) }
+                            .padding(.horizontal,7).frame(height: 36).background(.white.opacity(0.23),in: Capsule())
+                    }.accessibilityLabel("Room chat")
+                    tool("Microphone settings",15,.mic); tool("Choose a gift",19,.gift); tool("Music on demand",16,.music)
+                }
+                .fixedSize(horizontal: false, vertical: true)
+            }.padding(.horizontal, 16).padding(.vertical, spacing)
+            .frame(width: geo.size.width, height: geo.size.height)
             .background { ZStack(alignment: .bottom) {
                 LinearGradient(colors: [Color(red: 0.015,green: 0.08,blue: 0.2), Color(red: 0.07,green: 0.18,blue: 0.34)],startPoint: .top,endPoint: .bottom)
                 RoomArtwork("moonlit-sea").scaledToFill().frame(width: geo.size.width,height: geo.size.height * 0.35).clipped().mask(LinearGradient(colors: [.clear,.black,.black],startPoint: .top,endPoint: .bottom))
             }.ignoresSafeArea() }
-        }.foregroundColor(.white).buttonStyle(.plain).toolbar(.hidden,for: .navigationBar).preferredColorScheme(.dark)
+        }.foregroundColor(.white).buttonStyle(.plain).toolbar(.hidden,for: .navigationBar)
     }
 }
 

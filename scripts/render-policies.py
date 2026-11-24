@@ -20,7 +20,8 @@ for key in ('terms', 'privacy'):
     title = ParagraphStyle('Title', fontName='Helvetica-Bold', fontSize=23, leading=28, textColor=colors.HexColor('#144a5b'))
     label = ParagraphStyle('Label', fontName='Helvetica-Bold', fontSize=12, leading=15, spaceBefore=10, spaceAfter=4)
     body = ParagraphStyle('Body', fontName='Helvetica', fontSize=10, leading=13.5, textColor=colors.HexColor('#243f49'))
-    story = [Paragraph(policy['title'], title), Spacer(1, 5), Paragraph('Effective November 20, 2026', body)]
+    effective = "November 24, 2026"
+    story = [Paragraph(policy['title'], title), Spacer(1, 5), Paragraph(f"Effective {effective}", body)]
     for heading, text in policy['sections']:
         story.extend([Paragraph(escape(heading), label), Paragraph(escape(text), body)])
     doc.build(story)

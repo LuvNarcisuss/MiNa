@@ -14,7 +14,7 @@ struct AccountScreen: View {
     }()
 
     var body: some View {
-        content.preferredColorScheme(.light)
+        content
     }
 
     @ViewBuilder private var content: some View {
@@ -23,7 +23,7 @@ struct AccountScreen: View {
             if let policy = Self.policies[key] {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
-                        Text("Effective November 20, 2026").font(.caption)
+                        Text(key == "guidelines" ? "Effective November 20, 2026" : "Effective November 24, 2026").font(.caption)
                         ForEach(policy.sections.indices, id: \.self) { i in
                             let part = policy.sections[i]
                             if part.count == 2 { Text(part[0]).font(.headline); Text(part[1]) }
@@ -49,7 +49,7 @@ struct AccountScreen: View {
                 Spacer()
                 VStack(spacing: 16) {
                     Text(removing ? "Delete your MiNa account?" : "Sign out of MiNa?").font(.title3.bold())
-                    Text(removing ? "Your cloud account, uploaded media, messages and associated records will be permanently removed." : "Your account key stays in Keychain. Use Continue on this iPhone to reopen your account.")
+                    Text(removing ? "Your cloud account, uploaded media, messages and associated records will be permanently removed." : "Sign in again with your email and password to return to your account.")
                         .font(.callout).multilineTextAlignment(.center)
                     Button(role: .destructive) { Task { await app.leave(delete: removing) } } label: {
                         Text(removing ? "Permanently delete" : "Sign out").font(.headline).foregroundStyle(.black)

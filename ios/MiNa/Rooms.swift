@@ -184,6 +184,7 @@ private struct RoomDiscovery: View {
                     let result = skip ? [] : try await app.api.rows(path)
                     try Task.checkCancellation()
                     rooms = result; status = ""
+                    if home { app.didRefreshRoot("rooms") }
                 } catch { if Task.isCancelled { return }; rooms = []; status = "Live rooms could not load." }
                 try? await Task.sleep(nanoseconds: 20_000_000_000)
             }
@@ -509,7 +510,7 @@ private struct RoomEditorView: View {
                 if !error.isEmpty { Text(error).font(.callout) }
             }.padding(.horizontal,19).padding(.bottom,18)
         }.background { NativeArt("createRoom",1).ignoresSafeArea().accessibilityHidden(true) }
-        .tint(.mint).foregroundColor(.white).buttonStyle(.plain).disabled(busy).toolbar(.hidden,for: .navigationBar).preferredColorScheme(.dark).onAppear {
+        .tint(.mint).foregroundColor(.white).buttonStyle(.plain).disabled(busy).toolbar(.hidden,for: .navigationBar).onAppear {
             if let id, let d = drafts.first(where: { $0.roomText("id") == id }) {
                 title = d.roomText("title"); cover = d.roomText("cover"); topic = d.roomText("topic"); visibility = d.roomText("visibility")
                 follow = d.roomFlag("follow"); gifts = d.roomFlag("gifts"); comments = d.roomFlag("comments")

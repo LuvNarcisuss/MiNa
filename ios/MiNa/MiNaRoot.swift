@@ -6,19 +6,65 @@ struct NativeRoute: Hashable {
     var id: String? = nil
 }
 
+enum EntryMode {
+    case signIn, link
+
+    var title: String {
+        switch self {
+        case .signIn: return "Sign in"
+        case .link: return "Link this account"
+        }
+    }
+}
+
 @MainActor
 final class MiNaAppModel: ObservableObject {
-    let api = MiNaAPI()
+    let api: MiNaAPI
+    let wallet: WalletStore
+
+    init() {
+        let api = MiNaAPI()
+        self.api = api
+        self.wallet = WalletStore(api: api)
+    }
     let media = DeviceMedia()
     @Published var signedIn = false
     @Published var busy = false
     @Published var accountError = ""
+    @Published var entryMode: EntryMode = .signIn
+    @Published var entryNotice = ""
+    @Published private(set) var hasLegacyAccount = false
     @Published var companionTopic: Int?
     @Published var tab = "rooms"
     @Published var path: [NativeRoute] = []
     @Published private var snapshot: [String: Any] = [:]
+    @Published private(set) var safetyRevision = 0
+    @Published private(set) var rootRevision = 0
+    @Published var safetyNotice: String?
+    private var blockNotice: (tab: String, text: String)?
     private var restored = false
-    private let unlocked = "mina.native.unlocked"
+
+    func safetyChanged() { safetyRevision += 1 }
+
+    func blockMember(_ id: String, name: String) async throws {
+        let owner = api.userID
+        let origin = tab
+        guard signedIn, id != owner else { throw MiNaIssue("This listener cannot be blocked.") }
+        try await api.rest("blocks", method: "POST", body: ["owner_id": owner, "blocked_id": id], prefer: "resolution=ignore-duplicates")
+        guard signedIn, api.userID == owner else { return }
+        CommunityPlayer.pauseActive()
+        tab = origin
+        blockNotice = (origin, (name.isEmpty ? "Listener" : name) + " has been blocked.")
+        path.removeAll()
+        rootRevision += 1
+        safetyChanged()
+    }
+
+    func didRefreshRoot(_ name: String) {
+        guard path.isEmpty, tab == name, let pending = blockNotice, pending.tab == name else { return }
+        blockNotice = nil
+        safetyNotice = pending.text
+    }
     private let deletionOwner = "mina.native.deletedOwner"
 
     var route: NativeRoute { path.last ?? NativeRoute(name: tab) }
@@ -54,25 +100,72 @@ final class MiNaAppModel: ObservableObject {
             let oldCache = cache.appendingPathComponent("MiNaPages", isDirectory: true)
             if FileManager.default.fileExists(atPath: oldCache.path) { try? FileManager.default.removeItem(at: oldCache) }
         }
-        do { try finishDeletion() } catch { accountError = error.localizedDescription; return }
-        if UserDefaults.standard.bool(forKey: unlocked) { await enter(create: false) }
-    }
-
-    func enter(create: Bool) async {
-        guard !busy else { return }
         busy = true
         defer { busy = false }
         do {
             try finishDeletion()
-            try await api.signIn(allowCreation: create)
-            AccountLibrary.owner = try SessionStore.owner(SessionStore.read())
-            snapshot = try AccountLibrary.loadState()
-            UserDefaults.standard.set(true, forKey: unlocked)
-            accountError = ""
-            path = []
-            tab = "rooms"
-            signedIn = true
+            hasLegacyAccount = try SessionStore.read(.legacy) != nil
+            try SessionStore.write(nil, to: .password)
+            UserDefaults.standard.removeObject(forKey: "mina.native.unlocked")
         } catch { accountError = error.localizedDescription }
+    }
+
+    func submit(email input: String, password: String) async {
+        guard restored, !busy, !signedIn else { return }
+        accountError = ""
+        entryNotice = ""
+        let email = input.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard MiNaAPI.validEmail(email) else {
+            accountError = "Enter a valid email address."
+            return
+        }
+        guard !password.isEmpty else { accountError = "Enter your password."; return }
+        busy = true
+        defer { busy = false }
+        do {
+            try finishDeletion()
+            switch entryMode {
+            case .signIn:
+                try await api.signIn(email: email, password: password)
+            case .link:
+                let legacy = MiNaAPI(slot: .legacy)
+                guard try await legacy.linkLegacyAccount(email: email, password: password) else {
+                    entryNotice = "Open the confirmation link in your email, then return here and finish linking with the same email and your chosen password."
+                    return
+                }
+                try await api.signIn(email: email, password: password, expectedOwner: legacy.userID)
+            }
+            try await openAccount()
+        } catch {
+            api.close()
+            accountError = error.localizedDescription
+        }
+    }
+
+    private func openAccount() async throws {
+        guard let owner = UUID(uuidString: api.userID) else { throw MiNaIssue("Sign in to continue.") }
+        _ = try await api.rest("rpc/bootstrap", method: "POST", body: [:] as [String: String])
+        AccountLibrary.owner = owner.uuidString
+        do {
+            snapshot = try AccountLibrary.loadState()
+            try removeLegacySession(for: owner)
+        } catch {
+            AccountLibrary.owner = "Device"
+            throw error
+        }
+        accountError = ""
+        entryNotice = ""
+        path = []
+        tab = "rooms"
+        signedIn = true
+        wallet.setOwner(api.userID)
+    }
+
+    private func removeLegacySession(for owner: UUID) throws {
+        if try SessionStore.owner(SessionStore.read(.legacy)) == owner.uuidString {
+            try SessionStore.write(nil, to: .legacy)
+            hasLegacyAccount = false
+        }
     }
 
     func leave(delete: Bool) async {
@@ -87,10 +180,17 @@ final class MiNaAppModel: ObservableObject {
                     UserDefaults.standard.set(AccountLibrary.owner, forKey: deletionOwner)
                 }
                 try finishDeletion()
+            } else {
+                api.signOut()
             }
+            wallet.setOwner("")
             api.close()
+            blockNotice = nil
+            safetyNotice = nil
             signedIn = false
-            UserDefaults.standard.set(false, forKey: unlocked)
+            companionTopic = nil
+            entryMode = .signIn
+            entryNotice = ""
             snapshot = [:]
             AccountLibrary.owner = "Device"
             tab = "rooms"
@@ -103,8 +203,8 @@ final class MiNaAppModel: ObservableObject {
         guard let value = UserDefaults.standard.string(forKey: deletionOwner), let owner = UUID(uuidString: value) else { return }
         AccountLibrary.owner = owner.uuidString
         try media.clear()
-        try SessionStore.write(nil)
-        UserDefaults.standard.removeObject(forKey: unlocked)
+        try removeLegacySession(for: owner)
+        try SessionStore.write(nil, to: .password)
         UserDefaults.standard.removeObject(forKey: deletionOwner)
         AccountLibrary.owner = "Device"
     }
@@ -160,14 +260,18 @@ struct MiNaRoot: View {
     private let tabs = [("rooms", "Rooms", 1), ("feed", "Feed", 2), ("ai", "AI Companion", 5),
                         ("messages", "Messages", 3), ("profile", "Profile", 4)]
 
+    private var statusBarScheme: ColorScheme {
+        let nightHeaders = ["rooms", "feed", "ai", "ai.chat", "messages", "profile",
+                            "rooms.search", "rooms.create", "rooms.stage", "rooms.live"]
+        if !app.signedIn && app.path.isEmpty { return .dark }
+        return nightHeaders.contains(app.route.name) ? .dark : .light
+    }
+
     var body: some View {
-        VStack(spacing: 0) {
-            NavigationStack(path: $app.path) {
-                Group {
-                    if app.signedIn { destination(NativeRoute(name: app.tab)) }
-                    else { WelcomeScreen() }
-                }
-                .navigationDestination(for: NativeRoute.self) { route in destination(route) }
+        NavigationStack(path: $app.path) {
+            Group {
+                if app.signedIn { destination(NativeRoute(name: app.tab)).id(app.rootRevision) }
+                else { WelcomeScreen() }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .overlay(alignment: .bottomTrailing) {
@@ -179,30 +283,38 @@ struct MiNaRoot: View {
                     .accessibilityLabel("Create a room")
                 }
             }
-            if app.signedIn && app.path.isEmpty {
-                HStack(spacing: 0) {
-                    ForEach(tabs.indices, id: \.self) { index in
-                        let item = tabs[index]
-                        Button { app.tab = item.0 } label: {
-                            NativeArt("tabs", item.2 == 5 || app.tab == item.0 ? item.2 : item.2 + 5)
-                                .scaledToFit().frame(width: item.2 == 5 ? 41 : 24, height: 44)
-                                .frame(maxWidth: .infinity).contentShape(Rectangle())
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if app.signedIn && app.path.isEmpty {
+                    HStack(spacing: 0) {
+                        ForEach(tabs.indices, id: \.self) { index in
+                            let item = tabs[index]
+                            Button { app.tab = item.0 } label: {
+                                NativeArt("tabs", item.2 == 5 || app.tab == item.0 ? item.2 : item.2 + 5)
+                                    .scaledToFit().frame(width: item.2 == 5 ? 41 : 24, height: 44)
+                                    .frame(maxWidth: .infinity).contentShape(Rectangle())
+                            }
+                            .accessibilityLabel(item.1)
+                            .accessibilityAddTraits(app.tab == item.0 ? .isSelected : [])
                         }
-                        .accessibilityLabel(item.1)
-                        .accessibilityAddTraits(app.tab == item.0 ? .isSelected : [])
+                    }
+                    .padding(.vertical, 5)
+                    .background {
+                        RoundedRectangle(cornerRadius: 20).fill(.white).shadow(color: .black.opacity(0.07), radius: 2, y: -1)
+                            .padding(.bottom, -24).ignoresSafeArea(edges: .bottom)
                     }
                 }
-                .padding(.vertical, 5)
-                .background {
-                    RoundedRectangle(cornerRadius: 20).fill(.white).shadow(color: .black.opacity(0.07), radius: 2, y: -1)
-                        .padding(.bottom, -24).ignoresSafeArea(edges: .bottom)
-                }
             }
+            .navigationDestination(for: NativeRoute.self) { route in destination(route) }
         }
         .accessibilityHidden(app.companionTopic != nil)
         .overlay { if app.signedIn, let topic = app.companionTopic { CompanionTopicOverlay(topic: topic) } }
         .overlay(alignment: .top) { if app.signedIn { IncomingCallBanner() } }
         .tint(Color(red: 0.04, green: 0.43, blue: 0.43))
+        .environment(\.colorScheme, .light)
+        .preferredColorScheme(statusBarScheme)
+        .alert("Community safety", isPresented: Binding(get: { app.safetyNotice != nil }, set: { if !$0 { app.safetyNotice = nil } })) {
+            Button("OK") { app.safetyNotice = nil }
+        } message: { Text(app.safetyNotice ?? "") }
         .task { await app.restore() }
     }
 
@@ -213,7 +325,8 @@ struct MiNaRoot: View {
         case "messages": MessagesScreen(route: route)
         case "profile", "person": ProfileScreen(route: route)
         case "ai": CompanionScreen(route: route)
-        case "wallet", "level", "store": EconomyScreen(route: route)
+        case "wallet": WalletScreen(store: app.wallet)
+        case "level", "store": EconomyScreen(route: route)
         case "legal", "support", "delete", "logout": AccountScreen(route: route)
         default: Text("This page is unavailable.")
         }
@@ -222,35 +335,157 @@ struct MiNaRoot: View {
 
 private struct WelcomeScreen: View {
     @EnvironmentObject var app: MiNaAppModel
+    private enum Field { case email, password }
+    @FocusState private var focused: Field?
+    @State private var email = ""
+    @State private var password = ""
     @State private var consent = false
+
+    private var canSubmit: Bool {
+        consent && !app.busy && !password.isEmpty &&
+            MiNaAPI.validEmail(email.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    private let mint = Color(red: 0.68, green: 1, blue: 0.87)
+    private let midnight = Color(red: 0.025, green: 0.085, blue: 0.19)
+
     var body: some View {
-        ZStack {
-            nativeArtwork("signIn", "welcome").ignoresSafeArea().accessibilityHidden(true)
-            GeometryReader { geometry in
-                VStack(spacing: 8) {
-                    Spacer(minLength: 0)
-                    Text("MiNa").font(.system(size: 34, weight: .heavy))
-                    Text("Sleep better.\nTalk deeper.").font(.headline).multilineTextAlignment(.center)
-                    Button { Task { await app.enter(create: true) } } label: {
-                        Text(app.busy ? "Connecting…" : "Continue").font(.headline)
-                            .foregroundStyle(Color(red: 0.03, green: 0.32, blue: 0.39))
-                            .frame(width: geometry.size.width * 0.72, height: 52)
-                            .background(.white, in: Capsule()).overlay { Capsule().stroke(.cyan.opacity(0.4), lineWidth: 2) }
-                    }.disabled(!consent || app.busy).padding(.top, 16)
-                    HStack(spacing: 5) {
-                        Button { consent.toggle() } label: {
-                            Image(systemName: consent ? "checkmark.circle.fill" : "circle")
-                            Text("I agree to the")
-                        }.accessibilityLabel("Agree to the terms and privacy policy").accessibilityValue(consent ? "Selected" : "Unselected")
-                        Button("Terms") { app.go("legal.terms") }.underline()
-                        Text("and")
-                        Button("Privacy Policy") { app.go("legal.privacy") }.underline()
-                    }.font(.footnote.weight(.semibold)).padding(.horizontal, 8).padding(.vertical, 6)
-                        .background(.black.opacity(0.28), in: Capsule())
-                    if !app.accountError.isEmpty { Text(app.accountError).font(.footnote).multilineTextAlignment(.center) }
-                    Spacer().frame(height: geometry.size.height * 0.15)
-                }.frame(maxWidth: .infinity).foregroundStyle(.white).buttonStyle(.plain)
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(spacing: 0) {
+                    Spacer(minLength: 16)
+                    Text("MiNa")
+                        .font(.system(.largeTitle, design: .rounded, weight: .heavy))
+                        .foregroundStyle(.white)
+                        .shadow(color: midnight.opacity(0.55), radius: 8, y: 3)
+                        .accessibilityAddTraits(.isHeader)
+                    if app.entryMode == .link {
+                        Text("Keep the rooms, posts and coins from your account on this iPhone.")
+                            .font(.subheadline).multilineTextAlignment(.center).padding(.top, 6)
+                    }
+                    VStack(spacing: 12) {
+                        VStack(spacing: 0) {
+                            credentialRow("Email", fieldID: .email) {
+                                TextField("", text: $email, prompt: fieldPrompt("you@example.com"))
+                                    .keyboardType(.emailAddress).textContentType(.username)
+                                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                                    .focused($focused, equals: .email).submitLabel(.next)
+                                    .onSubmit { focused = .password }
+                                    .accessibilityLabel("Email address")
+                            }
+                            Rectangle().fill(.white.opacity(0.22)).frame(height: 1)
+                                .padding(.horizontal, 18).accessibilityHidden(true)
+                            credentialRow("Password", fieldID: .password) {
+                                SecureField("", text: $password, prompt: fieldPrompt("Password"))
+                                    .textContentType(app.entryMode == .signIn ? .password : .newPassword)
+                                    .focused($focused, equals: .password).submitLabel(.go)
+                                    .onSubmit { submit() }.accessibilityLabel("Password")
+                            }
+                        }
+                        .background(midnight.opacity(0.64), in: RoundedRectangle(cornerRadius: 22))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 22)
+                                .strokeBorder(focused == nil ? .white.opacity(0.28) : mint.opacity(0.75), lineWidth: 1)
+                                .allowsHitTesting(false)
+                        }
+                        consentRow
+                        if !app.accountError.isEmpty {
+                            Text(app.accountError).font(.footnote.weight(.semibold))
+                                .foregroundStyle(Color(red: 1, green: 0.84, blue: 0.80))
+                        }
+                        if !app.entryNotice.isEmpty { Text(app.entryNotice).font(.footnote) }
+                        Button(action: submit) {
+                            Group {
+                                if app.busy { ProgressView().tint(midnight) }
+                                else { Text(app.entryMode.title).font(.headline.weight(.bold)) }
+                            }
+                            .frame(maxWidth: .infinity, minHeight: 52)
+                            .foregroundStyle(midnight)
+                            .background(
+                                LinearGradient(colors: [mint, Color(red: 0.50, green: 0.85, blue: 1)],
+                                               startPoint: .leading, endPoint: .trailing), in: Capsule()
+                            )
+                        }
+                        .disabled(!canSubmit).opacity(canSubmit || app.busy ? 1 : 0.72)
+                        if app.entryMode != .signIn { modeButton("Sign in to an existing account", .signIn) }
+                        if app.hasLegacyAccount && app.entryMode != .link { modeButton("Link my previous account", .link) }
+                    }
+                    .padding(.top, 22)
+                    .disabled(app.busy)
+                }
+                .foregroundStyle(.white).tint(mint).buttonStyle(.plain)
+                .padding(.horizontal, 26).padding(.bottom, 12)
+                .frame(maxWidth: 460)
+                .frame(maxWidth: .infinity, minHeight: geometry.size.height, alignment: .bottom)
+            }.scrollDismissesKeyboard(.interactively)
+        }
+        .background {
+            GeometryReader { sky in
+                nativeArtwork("signIn", "welcome").scaledToFill()
+                    .frame(width: sky.size.width, height: sky.size.height).clipped()
+                    .overlay {
+                        LinearGradient(stops: [
+                            .init(color: .clear, location: 0.26),
+                            .init(color: midnight.opacity(0.25), location: 0.45),
+                            .init(color: midnight.opacity(0.83), location: 0.68),
+                            .init(color: midnight.opacity(0.95), location: 1)
+                        ], startPoint: .top, endPoint: .bottom)
+                    }
+                    .overlay(focused == nil ? Color.clear : midnight.opacity(0.33))
+            }.ignoresSafeArea().accessibilityHidden(true)
+        }
+        .toolbar(.hidden, for: .navigationBar)
+    }
+
+    private func fieldPrompt(_ text: String) -> Text {
+        Text(text).foregroundColor(.white.opacity(0.65))
+    }
+
+    private func credentialRow<Content: View>(_ title: String, fieldID: Field, @ViewBuilder field: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.caption.weight(.semibold))
+                .foregroundStyle(focused == fieldID ? mint : .white.opacity(0.85)).accessibilityHidden(true)
+            field().font(.body).textFieldStyle(.plain)
+        }
+        .padding(.horizontal, 18).padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .onTapGesture { focused = fieldID }
+    }
+
+    private var consentRow: some View {
+        HStack(alignment: .center, spacing: 2) {
+            Button {
+                consent.toggle()
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: consent ? "checkmark.circle.fill" : "circle")
+                        .font(.title3).foregroundStyle(consent ? mint : .white.opacity(0.85))
+                    Text("I agree to the")
+                }.frame(minHeight: 44)
             }
-        }.toolbar(.hidden, for: .navigationBar)
+            .accessibilityLabel("I agree to the Terms and Privacy Policy")
+            .accessibilityValue(consent ? "Agreed" : "Not agreed")
+            Button { app.go("legal.terms") } label: { Text("Terms").underline().padding(.horizontal, 2).frame(minHeight: 44) }.foregroundStyle(mint)
+            Text("and")
+            Button { app.go("legal.privacy") } label: { Text("Privacy Policy").underline().padding(.horizontal, 2).frame(minHeight: 44) }.foregroundStyle(mint)
+        }
+        .font(.footnote.weight(.medium)).frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func modeButton(_ title: String, _ mode: EntryMode) -> some View {
+        Button(title) {
+            focused = nil
+            app.entryMode = mode
+            password = ""
+            app.accountError = ""
+            app.entryNotice = ""
+        }.font(.subheadline.weight(.semibold)).frame(minHeight: 44)
+    }
+
+    private func submit() {
+        guard canSubmit else { return }
+        focused = nil
+        Task { await app.submit(email: email, password: password) }
     }
 }
