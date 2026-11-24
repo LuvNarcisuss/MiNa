@@ -10,6 +10,7 @@
 		E03A1E6273C67AC723941B11 /* policies.json in Resources */ = {isa = PBXBuildFile; fileRef = AA12C5CC8B13DCDCD609831D /* policies.json */; };
 		B5221DB183956BB69B481439 /* VoicePeer.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0D2C6EF97E2832A52EA001 /* VoicePeer.swift */; };
 		2C66B6E200E315861527007D /* VoiceCall.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0225C7CAACFDCE07BABDD1BA /* VoiceCall.swift */; };
+		14FEAE7B716148C69935F831 /* CallPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89915821925F4C6B9D76A221 /* CallPreview.swift */; };
 		AAE03447D76481070C389350 /* RoomsStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0513A04463DDEEC5C23AD018 /* RoomsStage.swift */; };
 		CC753A8FB52988C2C0EB3B02 /* RoomsSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBFDA90E59FBB77DB5BD83C3 /* RoomsSession.swift */; };
 		E8BB9275CF9D280A0D454AFB /* RoomsLive.swift in Sources */ = {isa = PBXBuildFile; fileRef = 732729F168D81CBBA279E1F3 /* RoomsLive.swift */; };
@@ -30,6 +31,7 @@
 		3123FC78331909498B8C0363 /* AccountScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 085800FE1B8F4BF092ACBC08 /* AccountScreen.swift */; };
 		FFF77BFCE6809265646E9632 /* AccountLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7716DFF29765C6819AC481F4 /* AccountLibrary.swift */; };
 		8A4CCE8B938555F28FF1F0BC /* WebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = B44E2AE76DD745D3726B838D /* WebRTC */; };
+		900DA5FB504D4A85916B4170 /* TPInAppReceipt in Frameworks */ = {isa = PBXBuildFile; productRef = E8F022BC9727447AA2F10312 /* TPInAppReceipt */; };
 		2FA87643943C8B65F29E54DA /* Companion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43154AB36D82FEC9004514C3 /* Companion.swift */; };
 		8C63BFAA50053D82F563F45B /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11036212099E5BF7B06D4B0B /* AppDelegate.swift */; };
 		A65968899B82841CA405C2D2 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 9373E7253C83304531946C86 /* PrivacyInfo.xcprivacy */; };
@@ -44,6 +46,7 @@
 		AA12C5CC8B13DCDCD609831D /* policies.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = policies.json; sourceTree = "<group>"; };
 		BB0D2C6EF97E2832A52EA001 /* VoicePeer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoicePeer.swift; sourceTree = "<group>"; };
 		0225C7CAACFDCE07BABDD1BA /* VoiceCall.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceCall.swift; sourceTree = "<group>"; };
+		89915821925F4C6B9D76A221 /* CallPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallPreview.swift; sourceTree = "<group>"; };
 		0513A04463DDEEC5C23AD018 /* RoomsStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomsStage.swift; sourceTree = "<group>"; };
 		FBFDA90E59FBB77DB5BD83C3 /* RoomsSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomsSession.swift; sourceTree = "<group>"; };
 		732729F168D81CBBA279E1F3 /* RoomsLive.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomsLive.swift; sourceTree = "<group>"; };
@@ -79,6 +82,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				8A4CCE8B938555F28FF1F0BC /* WebRTC in Frameworks */,
+				900DA5FB504D4A85916B4170 /* TPInAppReceipt in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -107,6 +111,7 @@
 				AA12C5CC8B13DCDCD609831D /* policies.json */,
 				BB0D2C6EF97E2832A52EA001 /* VoicePeer.swift */,
 				0225C7CAACFDCE07BABDD1BA /* VoiceCall.swift */,
+				89915821925F4C6B9D76A221 /* CallPreview.swift */,
 				0513A04463DDEEC5C23AD018 /* RoomsStage.swift */,
 				FBFDA90E59FBB77DB5BD83C3 /* RoomsSession.swift */,
 				732729F168D81CBBA279E1F3 /* RoomsLive.swift */,
@@ -164,6 +169,7 @@
 			name = MiNa;
 			packageProductDependencies = (
 				B44E2AE76DD745D3726B838D /* WebRTC */,
+				E8F022BC9727447AA2F10312 /* TPInAppReceipt */,
 			);
 			productName = MiNa;
 			productReference = DDAF72F3E994EB44A80473EA /* MiNa.app */;
@@ -196,6 +202,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				32239D8A27C94C96BB285B23 /* XCRemoteSwiftPackageReference "WebRTC" */,
+				1AA2B70D84264985911A4470 /* XCRemoteSwiftPackageReference "TPInAppReceipt" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 5E93592F700C7875AF8F5497 /* Products */;
@@ -229,6 +236,7 @@
 			files = (
 				B5221DB183956BB69B481439 /* VoicePeer.swift in Sources */,
 				2C66B6E200E315861527007D /* VoiceCall.swift in Sources */,
+				14FEAE7B716148C69935F831 /* CallPreview.swift in Sources */,
 				AAE03447D76481070C389350 /* RoomsStage.swift in Sources */,
 				CC753A8FB52988C2C0EB3B02 /* RoomsSession.swift in Sources */,
 				E8BB9275CF9D280A0D454AFB /* RoomsLive.swift in Sources */,
@@ -460,6 +468,14 @@
 				version = 137.0.0;
 			};
 		};
+		1AA2B70D84264985911A4470 /* XCRemoteSwiftPackageReference "TPInAppReceipt" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/tikhop/TPInAppReceipt.git";
+			requirement = {
+				kind = exactVersion;
+				version = 4.0.2;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -467,6 +483,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 32239D8A27C94C96BB285B23 /* XCRemoteSwiftPackageReference "WebRTC" */;
 			productName = WebRTC;
+		};
+		E8F022BC9727447AA2F10312 /* TPInAppReceipt */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1AA2B70D84264985911A4470 /* XCRemoteSwiftPackageReference "TPInAppReceipt" */;
+			productName = TPInAppReceipt;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

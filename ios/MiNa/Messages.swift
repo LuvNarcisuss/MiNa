@@ -87,6 +87,9 @@ private struct MessageListScreen: View {
     @State private var refreshPending = false
     @State private var clear: InboxRow?
     @State private var confirmCall = false
+    @Environment(\.scenePhase) private var phase
+    @State private var isFriend = false
+    @State private var preview: CallPreviewMode?
     @State private var showEmoji = false
     @State private var opened = ""
     @State private var take = 50
@@ -95,6 +98,8 @@ private struct MessageListScreen: View {
     let titles = ["platform": "Platform notifications", "follow": "New followers", "ranking": "Ranking updates"]
     var me: String { app.api.userID }
     var peer: String { route.id ?? "" }
+    private var pinnedPeers: [String] { app.state("chat.pinnedPeers") as? [String] ?? [] }
+    private var unreadPeers: [String] { app.state("chat.unreadPeers") as? [String] ?? [] }
     var draftKey: String { "chat.draft.\(peer)" }
     var inbox: Bool { route.name == "messages" }
     var thread: Bool { route.name == "messages.thread" }
@@ -179,15 +184,18 @@ private struct MessageListScreen: View {
                 try? await Task.sleep(nanoseconds: 10_000_000_000)
             }
         }
+        .onChange(of: phase) { next in
+            if thread && next == .active { Task { await refresh() } }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .inboxUpdated)) { _ in Task { await refresh() } }
         .overlay {
             if let selected = clear {
                 ZStack(alignment: .bottom) {
                     Color.black.opacity(0.4).ignoresSafeArea().onTapGesture { clear = nil }
                     VStack(spacing: 16) {
-                        Text("Clear this conversation?").font(.headline)
-                        Text("Clear your copy through the selected message.").font(.subheadline)
-                        Button("Clear my copy", role: .destructive) {
+                        Text("Delete this conversation?").font(.headline)
+                        Text("This removes the conversation from your inbox.").font(.subheadline)
+                        Button("Delete", role: .destructive) {
                             clear = nil
                             operate { try await mark(selected.id, selected.string("latest_id"), clear: true) }
                         }.frame(maxWidth: .infinity).padding(12).background(.white, in: Capsule())
@@ -196,6 +204,12 @@ private struct MessageListScreen: View {
                 }
             }
         }
+        .fullScreenCover(item: $preview) { mode in
+            if let person = people[peer] {
+                CallPreviewScreen(mode: mode, person: person, verifyFriendship: checkFriendship)
+            }
+        }
+        .onChange(of: isFriend) { if !$0 { preview = nil; confirmCall = false; showEmoji = false } }
         .confirmationDialog("Start a voice call?", isPresented: $confirmCall) {
             Button("Call \(title)") { operate {
                 let result = try await rpc("start_voice_call", ["p_id": dialID, "p_peer": peer])
@@ -220,23 +234,55 @@ private struct MessageListScreen: View {
             HStack { NativeArt("inbox",5).scaledToFit().frame(width: 46,height: 46); VStack(alignment: .leading, spacing: 4) { Text("System notifications").font(.headline); Text("Updates from MiNa").font(.caption).foregroundStyle(.secondary) }; Spacer(); badge(notices) }.messageCard()
         }
         let filtered = rows.filter { query.isEmpty || (($0.string("body") + (people[$0.id]?.string("name") ?? "")).localizedCaseInsensitiveContains(query)) }
-        ForEach(filtered) { row in
+        let pins = pinnedPeers
+        let byPeer = Dictionary(uniqueKeysWithValues: filtered.map { ($0.id, $0) })
+        ForEach(pins.compactMap { byPeer[$0] } + filtered.filter { !pins.contains($0.id) }) { row in
+            let pinned = pins.contains(row.id)
+            let unread = isUnread(row)
             Button { app.go("messages.thread",row.id) } label: {
                 HStack { InboxAvatar(person: people[row.id]); VStack(alignment: .leading) {
                     Text(people[row.id]?.string("name") ?? "Listener").bold()
                     Text(row.roomID == nil ? row.string("body") : "Voice room invitation").font(ReactionPicker.textFont(for: row.string("body"))).lineLimit(1).foregroundStyle(.secondary)
-                }; Spacer(); VStack(alignment: .trailing) { Text(row.timestamp).font(.caption2); badge(row.count("unread")) } }.messageCard()
-            }.swipeActions { Button("Clear", role: .destructive) { clear = row } }
+                }; Spacer()
+                    VStack(alignment: .trailing) {
+                        Text(row.timestamp).font(.caption2)
+                        HStack(spacing: 5) {
+                            if pinned {
+                                Image(systemName: "pin.fill").font(.caption2).foregroundStyle(.teal)
+                                    .accessibilityLabel("Pinned")
+                            }
+                            if row.count("unread") > 0 { badge(row.count("unread")) }
+                            else if unread {
+                                Circle().fill(.teal).frame(width: 9, height: 9)
+                                    .accessibilityLabel("Unread")
+                            }
+                        }
+                    }
+                }.messageCard()
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("conversation-" + row.id)
+            .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                Button(pinned ? "Unpin" : "Pin") {
+                    do {
+                        let remaining = pinnedPeers.filter { $0 != row.id }
+                        try app.save("chat.pinnedPeers", pinned ? remaining : [row.id] + remaining)
+                    } catch { self.error = error.localizedDescription }
+                }.tint(Color(red: 0.04, green: 0.42, blue: 0.41))
+                Button(unread ? "Mark read" : "Mark unread") {
+                    if unread { operate { try await mark(row.id, row.string("latest_id")) } }
+                    else {
+                        do { try app.save("chat.unreadPeers", unreadPeers + [row.id]) }
+                        catch { self.error = error.localizedDescription }
+                    }
+                }.tint(.blue)
+                Button("Delete") { clear = row }.tint(.red)
+            }
+            .buttonStyle(.automatic)
         }
-        if loaded && filtered.isEmpty {
+        if loaded && error.isEmpty && filtered.isEmpty {
             if query.isEmpty {
-                VStack(spacing: 8) {
-                    Text("No conversations yet.").font(.headline)
-                    Text("Find a listener by nickname to start a chat.").font(.subheadline).foregroundStyle(.secondary)
-                    Button("Find people") { app.go("profile.search") }
-                        .font(.subheadline.weight(.semibold)).padding(.horizontal, 20).frame(minHeight: 44)
-                        .background(.mint.opacity(0.25), in: Capsule())
-                }.frame(maxWidth: .infinity).padding(.vertical, 16)
+                InboxWelcomeCard { app.go("profile.search") }
             } else {
                 emptyMessage("No matching conversations.")
             }
@@ -299,10 +345,27 @@ private struct MessageListScreen: View {
         if let person = people[peer] {
             VStack(spacing: 6) {
                 Button { app.go("person", peer) } label: { InboxAvatar(person: person, size: 102) }.accessibilityLabel("View profile")
-                Button { confirmCall = true } label: { NativeArt("chat", 4).scaledToFit().frame(width: 74, height: 38) }
-                    .disabled(!person.flag("allow_calls") || busy).accessibilityLabel("Voice call")
-                if !person.flag("allow_messages") || !person.flag("allow_calls") {
-                    let unavailable = person.flag("allow_messages") ? "voice calls" : person.flag("allow_calls") ? "private messages" : "private messages and voice calls"
+                HStack(spacing: 12) {
+                    ForEach(CallPreviewMode.allCases) { mode in
+                        Button { operate {
+                            if await checkFriendship() { preview = mode }
+                        } } label: {
+                            Label(mode.rawValue, systemImage: mode.icon)
+                                .font(.subheadline.weight(.semibold))
+                                .padding(.horizontal, 12).frame(minHeight: 44)
+                                .background(.white.opacity(0.9), in: Capsule())
+                        }
+                    }
+                }
+                .grayscale(isFriend ? 0 : 1).opacity(isFriend ? 1 : 0.45).disabled(!isFriend || busy)
+                if person.flag("allow_calls") {
+                    Button("Start live voice call") { confirmCall = true }
+                        .font(.subheadline).frame(minHeight: 44).disabled(!isFriend || busy)
+                }
+                if !isFriend {
+                    Text("Follow each other to message or call.").font(.subheadline).foregroundStyle(.secondary)
+                } else if !person.flag("allow_messages") || !person.flag("allow_calls") {
+                    let unavailable = person.flag("allow_messages") ? "live voice calls" : person.flag("allow_calls") ? "private messages" : "private messages and live voice calls"
                     Text("This listener has turned off \(unavailable).")
                         .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
                 }
@@ -322,8 +385,10 @@ private struct MessageListScreen: View {
             }.listRowBackground(Color.clear).listRowSeparator(.hidden)
             .onAppear { if row.id == rows.first?.id && row.id != lastRead { Task { do { try await mark(peer,row.id); lastRead = row.id } catch { self.error = error.localizedDescription } } } }
         }
-        if loaded && rows.isEmpty && people[peer]?.flag("allow_messages") == true { emptyMessage("Start a conversation.") }
+        if loaded && rows.isEmpty && canMessage { emptyMessage("Start a conversation.") }
     }
+
+    private var canMessage: Bool { isFriend && people[peer]?.flag("allow_messages") == true }
 
     var composer: some View {
         VStack {
@@ -334,7 +399,7 @@ private struct MessageListScreen: View {
                 Button { operate { try await send() } } label: { NativeArt("chat",6).scaledToFit().frame(width: 64,height: 45) }
                     .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).accessibilityLabel("Send message")
             }.padding(.horizontal, 8).background(.white, in: Capsule())
-        }.padding(.horizontal, 16).padding(.bottom, 4).disabled(busy || people[peer]?.flag("allow_messages") != true)
+        }.padding(.horizontal, 16).padding(.bottom, 4).grayscale(canMessage ? 0 : 1).disabled(busy || !canMessage)
     }
 
     private func emptyMessage(_ text: String) -> some View {
@@ -356,8 +421,18 @@ private struct MessageListScreen: View {
         try await app.api.rest("rpc/" + name, method: "POST", body: body)
     }
 
-    private func mark(_ peer: String, _ id: String, clear: Bool = false) async throws {
+    private func isUnread(_ row: InboxRow) -> Bool {
+        row.count("unread") > 0 || unreadPeers.contains(row.id)
+    }
+
+    @MainActor private func mark(_ peer: String, _ id: String, clear: Bool = false) async throws {
+        let owner = me
         _ = try await rpc("mark_conversation",["p_peer":peer,"p_latest":id,"p_clear":clear])
+        guard owner == me, app.signedIn else { return }
+        var changes: [String: Any?] = [:]
+        if unreadPeers.contains(peer) { changes["chat.unreadPeers"] = unreadPeers.filter { $0 != peer } }
+        if clear && pinnedPeers.contains(peer) { changes["chat.pinnedPeers"] = pinnedPeers.filter { $0 != peer } }
+        if !changes.isEmpty { try app.saveChanges(changes) }
     }
 
     private func markNotices(id: String? = nil) async throws {
@@ -366,8 +441,15 @@ private struct MessageListScreen: View {
     }
 
     private func markAll() async throws {
-        for row in rows where row.count("unread") > 0 { try await mark(row.id,row.string("latest_id")) }
+        for row in rows where isUnread(row) { try await mark(row.id,row.string("latest_id")) }
         try await markNotices()
+    }
+
+    private func checkFriendship() async -> Bool {
+        let current = (try? await app.api.isChatFriend(peer)) ?? false
+        guard !Task.isCancelled else { return false }
+        isFriend = current
+        return current
     }
 
     private func send() async throws {
@@ -401,6 +483,7 @@ private struct MessageListScreen: View {
                     people = try await inboxPeople(following + values.compactMap { $0["peer_id"] as? String },api: app.api)
                 } else if thread {
                     guard UUID(uuidString: peer) != nil && peer != me else { throw VoiceFailure("Conversation unavailable.") }
+                    _ = await checkFriendship()
                     people = try await inboxPeople([peer], api: app.api)
                     guard people[peer] != nil else { throw VoiceFailure("This profile is unavailable.") }
                     values = []
@@ -421,11 +504,57 @@ private struct MessageListScreen: View {
                 try Task.checkCancellation()
                 rows = values.map(InboxRow.init(values:)); loaded = true; error = ""
                 if inbox { app.didRefreshRoot("messages") }
-            } catch { if !Task.isCancelled { self.error = error.localizedDescription } }
+            } catch { if !Task.isCancelled { isFriend = false; self.error = error.localizedDescription } }
         } while refreshPending && !Task.isCancelled
     }
 }
 
+
+private struct InboxWelcomeCard: View {
+    let findPeople: () -> Void
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Welcome to your inbox")
+                .font(.system(.title, design: .rounded, weight: .bold))
+                .foregroundStyle(.white)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: typeSize.isAccessibilitySize ? .infinity : 172, alignment: .leading)
+                .accessibilityAddTraits(.isHeader)
+            Button(action: findPeople) {
+                Text("Find people")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color(red: 0.03, green: 0.17, blue: 0.24))
+                    .padding(.horizontal, 20).frame(minHeight: 44)
+                    .background(Color(red: 0.67, green: 0.97, blue: 0.89), in: Capsule())
+            }
+        }
+        .padding(22)
+        .frame(maxWidth: .infinity, minHeight: 176, alignment: .leading)
+        .background {
+            ZStack(alignment: .trailing) {
+                Color(red: 0.035, green: 0.17, blue: 0.33)
+                if !typeSize.isAccessibilitySize {
+                    GeometryReader { area in
+                        let width = area.size.width * 0.55
+                        nativeArtwork("signIn", "welcome")
+                            .scaledToFill()
+                            .frame(width: width, height: area.size.height, alignment: .top)
+                            .offset(y: -width * 0.2)
+                            .frame(width: width, height: area.size.height, alignment: .top)
+                            .mask(LinearGradient(stops: [
+                                .init(color: .clear, location: 0),
+                                .init(color: .black, location: 0.42)
+                            ], startPoint: .leading, endPoint: .trailing))
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                    }
+                }
+            }.accessibilityHidden(true)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+}
 
 private extension View {
     func messageCard() -> some View {

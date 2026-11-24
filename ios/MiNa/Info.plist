@@ -28,8 +28,10 @@
 	<true/>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Connect voice audio with listeners on the same Wi-Fi network.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>See your camera on this iPhone during a video call preview.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Record dreams, speak in voice rooms, and make voice calls in MiNa.</string>
+	<string>Record dreams, speak in rooms and calls, and check your microphone level in call previews.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

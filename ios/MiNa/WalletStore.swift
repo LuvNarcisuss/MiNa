@@ -1,5 +1,9 @@
 import StoreKit
 import SwiftUI
+import OSLog
+#if DEBUG && targetEnvironment(simulator)
+import TPInAppReceipt
+#endif
 
 struct CoinPackage: Identifiable {
     let id: String
@@ -19,6 +23,49 @@ struct CoinPackage: Identifiable {
 // The queue observer outlives navigation and receives unfinished purchases at launch.
 @MainActor
 final class WalletStore: NSObject, ObservableObject, SKProductsRequestDelegate, SKPaymentTransactionObserver {
+    private static let catalogLog = Logger(subsystem: "com.mina.bedtime", category: "WalletCatalog")
+    #if DEBUG && targetEnvironment(simulator)
+    struct TestCredit: Codable {
+        let transaction: String
+        let coins: Int
+        let date: Date
+    }
+
+    @Published private(set) var testCredits: [TestCredit] = []
+    private var testLedgerURL: URL { AccountLibrary.library.appendingPathComponent("xcode-purchases.json") }
+
+    private func readTestCredits() throws -> [TestCredit] {
+        do { return try JSONDecoder().decode([TestCredit].self, from: Data(contentsOf: testLedgerURL)) }
+        catch let error as CocoaError where error.code == .fileReadNoSuchFile { return [] }
+    }
+
+    private func deliverTestPurchase(_ pack: CoinPackage, transaction: SKPaymentTransaction,
+                                     id: String, accountSession: UUID) async throws -> Bool {
+        _ = try await receipt(refresh: false)
+        let proof = try await AppReceipt.local
+        guard proof.environment == .xcode else { return false }
+        guard proof.bundleIdentifier == Bundle.main.bundleIdentifier, case .valid = await proof.validate(),
+              let item = proof.purchases.first(where: { $0.transactionIdentifier == id }),
+              item.productIdentifier == pack.id, item.quantity == 1, transaction.payment.quantity == 1,
+              item.cancellationDate == nil, item.subscriptionExpirationDate == nil,
+              item.productType == .consumable || item.productType == .unknown,
+              accountSession == session, owner == AccountLibrary.owner.lowercased() else {
+            throw MiNaIssue("This purchase could not be verified.")
+        }
+        var credits = try readTestCredits()
+        let newCredit = !credits.contains(where: { $0.transaction == id })
+        if newCredit {
+            credits.append(TestCredit(transaction: id, coins: pack.coins, date: Date()))
+            try FileManager.default.createDirectory(at: AccountLibrary.library, withIntermediateDirectories: true)
+            try JSONEncoder().encode(credits).write(to: testLedgerURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        }
+        testCredits = credits
+        finish(transaction)
+        recordDelivery(in: .local, balance: credits.reduce(0) { $0 + $1.coins }, pack: pack, newCredit: newCredit, id: id)
+        return true
+    }
+    #endif
+
     private let api: MiNaAPI
     private let queue = SKPaymentQueue.default()
     private var owner = ""
@@ -37,7 +84,35 @@ final class WalletStore: NSObject, ObservableObject, SKProductsRequestDelegate, 
     @Published private(set) var message = ""
     @Published private(set) var busy = false
     @Published private(set) var revision = 0
-    @Published private(set) var sandboxDelivery = false
+    enum Ledger { case production, sandbox, local }
+    struct PurchaseNotice: Identifiable {
+        let id: String
+        let coins: Int
+    }
+
+    @Published private(set) var notices: [PurchaseNotice] = []
+    private var lastLedger: Ledger?
+
+    func activeLedger() async -> Ledger {
+        if let lastLedger { return lastLedger }
+        #if DEBUG && targetEnvironment(simulator)
+        if let receipt = try? await AppReceipt.local, receipt.environment == .xcode { return .local }
+        #endif
+        return Bundle.main.appStoreReceiptURL?.lastPathComponent == "sandboxReceipt" ? .sandbox : .production
+    }
+
+    func dismissNotice() {
+        if !notices.isEmpty { notices.removeFirst() }
+    }
+
+    private func recordDelivery(in ledger: Ledger, balance: Int, pack: CoinPackage, newCredit: Bool, id: String) {
+        lastLedger = ledger
+        confirmedBalance = balance
+        message = ""
+        revision += 1
+        if newCredit { notices.append(PurchaseNotice(id: id, coins: pack.coins)) }
+    }
+
     @Published private(set) var confirmedBalance: Int?
 
     init(api: MiNaAPI) {
@@ -50,7 +125,8 @@ final class WalletStore: NSObject, ObservableObject, SKProductsRequestDelegate, 
         session = UUID()
         owner = account
         completeReceiptRefresh(.failure(CancellationError()))
-        sandboxDelivery = false
+        lastLedger = nil
+        notices.removeAll()
         request?.cancel()
         request = nil
         timeout?.cancel()
@@ -60,6 +136,13 @@ final class WalletStore: NSObject, ObservableObject, SKProductsRequestDelegate, 
         catalogMessage = ""
         message = ""
         confirmedBalance = nil
+        #if DEBUG && targetEnvironment(simulator)
+        testCredits = []
+        if !account.isEmpty {
+            do { testCredits = try readTestCredits() }
+            catch { message = "Your purchase history could not be read." }
+        }
+        #endif
         recover()
     }
 
@@ -88,6 +171,8 @@ final class WalletStore: NSObject, ObservableObject, SKProductsRequestDelegate, 
             self.timeout?.cancel()
             self.request = nil
             self.products = Dictionary(response.products.map { ($0.productIdentifier, $0) }, uniquingKeysWith: { first, _ in first })
+            let invalid = response.invalidProductIdentifiers.sorted().joined(separator: ",")
+            Self.catalogLog.info("Requested \(CoinPackage.all.count) products, received \(response.products.count), invalid IDs: \(invalid, privacy: .public)")
             if self.products.isEmpty { self.catalogMessage = "No packages are available in this storefront." }
             else if self.products.count < CoinPackage.all.count { self.catalogMessage = "Some packages are unavailable in this storefront." }
             else { self.catalogMessage = "" }
@@ -243,6 +328,10 @@ final class WalletStore: NSObject, ObservableObject, SKProductsRequestDelegate, 
             Task {
                 defer { delivering.remove(id); if current != session { recover() } }
                 do {
+                    #if DEBUG && targetEnvironment(simulator)
+                    if try await deliverTestPurchase(pack, transaction: transaction, id: id, accountSession: current) { return }
+                    guard current == session else { return }
+                    #endif
                     var result = try await claim(id, product: pack.id, sessionID: current, refresh: false)
                     guard current == session else { return }
                     if result["refreshReceipt"] as? Bool == true {
@@ -261,11 +350,9 @@ final class WalletStore: NSObject, ObservableObject, SKProductsRequestDelegate, 
                     guard let balance = row?["balance"] as? Int, balance >= 0 else {
                         throw MiNaIssue("Refresh your wallet to confirm the balance.")
                     }
-                    sandboxDelivery = environment == "Sandbox"
-                    confirmedBalance = balance
-                    revision += 1
                     finish(transaction)
-                    message = newCredit ? "\(pack.coins.formatted()) \(sandboxDelivery ? "sandbox" : "star") coins added." : "Your previous purchase is confirmed."
+                    recordDelivery(in: environment == "Sandbox" ? .sandbox : .production,
+                                   balance: balance, pack: pack, newCredit: newCredit, id: id)
                 } catch {
                     if current == session { message = error.localizedDescription + " Refresh your wallet to retry delivery." }
                 }

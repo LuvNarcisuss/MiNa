@@ -6,10 +6,9 @@ struct WalletScreen: View {
     @Environment(\.scenePhase) private var scenePhase
     @ObservedObject var store: WalletStore
     @State private var balance: Int?
-    @State private var sandboxBalance: Int?
     @State private var balanceError = false
     @State private var read = UUID()
-    @State private var selected: CoinPackage?
+    @State private var historyRefresh = 0
     @State private var showHistory = false
     @State private var checkout: Task<Void, Never>?
     @ScaledMetric private var bodySize: CGFloat = 16
@@ -37,21 +36,17 @@ struct WalletScreen: View {
                                 else { ProgressView() }
                             }.accessibilityIdentifier("wallet.balance")
                             Text("Star coin balance").font(.caption)
-                            if let sandboxBalance, sandboxBalance > 0 {
-                                Text("Sandbox balance: \(sandboxBalance.formatted())").font(.footnote)
-                            }
+
                         }
                         Spacer()
                         NativeArt("wallet", 3).scaledToFit().frame(width: 124, height: 132).accessibilityHidden(true)
                     }
-                    Text("Choose a package to add star coins to your wallet.")
-                        .font(.footnote).fixedSize(horizontal: false, vertical: true)
                     if !SKPaymentQueue.canMakePayments() { Text("Purchases are disabled on this iPhone.").font(.footnote) }
                     if !store.catalogMessage.isEmpty { Text(store.catalogMessage).font(.footnote) }
                     if !store.message.isEmpty { Text(store.message).font(.callout).accessibilityIdentifier("wallet.status") }
                     ForEach(CoinPackage.all) { pack in
                         let price = store.price(pack)
-                        Button { selected = pack } label: {
+                        Button { checkout = Task { await store.buy(pack) } } label: {
                             HStack(spacing: 9) {
                                 NativeArt("wallet", 6).scaledToFit().frame(width: 34, height: 36).accessibilityHidden(true)
                                 ViewThatFits(in: .horizontal) {
@@ -82,13 +77,16 @@ struct WalletScreen: View {
                         .accessibilityIdentifier("wallet.package.\(pack.coins)")
                     }
                     HStack {
-                        Button("Refresh") { Task { await refresh() } }
+                        Text("Purchase history").font(.headline).accessibilityAddTraits(.isHeader)
                         Spacer()
-                        Button("Wallet activity") { showHistory = true }
-                    }.font(.subheadline.weight(.semibold)).padding(.vertical, 8)
-                    Button("My backpack") { app.go("store.bag") }.font(.subheadline.weight(.semibold))
+                        Button("View all") { showHistory = true }.font(.subheadline)
+                    }.padding(.top, 8)
+                    WalletActivity(store: store, purchasesOnly: true, refreshVersion: historyRefresh)
                 }.padding(.horizontal, 20).padding(.vertical, 18)
-            }.refreshable { await refresh() }
+            }.refreshable {
+                historyRefresh += 1
+                await refresh()
+            }
         }
         .foregroundStyle(.primary)
         .buttonStyle(.plain)
@@ -97,17 +95,15 @@ struct WalletScreen: View {
         .task { await refresh() }
         .onChange(of: store.revision) { _ in
             read = UUID()
-            if store.sandboxDelivery { sandboxBalance = store.confirmedBalance }
-            else { balance = store.confirmedBalance }
+            balance = store.confirmedBalance
             Task { await loadBalance() }
         }
         .onChange(of: scenePhase) { phase in if phase == .active { store.recover() } }
         .onDisappear { checkout?.cancel() }
-        .alert(item: $selected) { pack in
-            Alert(title: Text("Add \(pack.coins.formatted()) star coins?"),
-                  message: Text(store.price(pack).map { "Confirm your purchase for " + $0 + "." } ?? "This package is unavailable."),
-                  primaryButton: .default(Text("Continue")) { checkout = Task { await store.buy(pack) } },
-                  secondaryButton: .cancel())
+        .alert(item: Binding(get: { store.notices.first }, set: { if $0 == nil { store.dismissNotice() } })) { notice in
+            Alert(title: Text("Purchase successful"),
+                  message: Text("\(notice.coins.formatted()) star coins added."),
+                  dismissButton: .default(Text("OK")))
         }
         .sheet(isPresented: $showHistory) { WalletActivity(store: store) }
     }
@@ -123,14 +119,20 @@ struct WalletScreen: View {
         read = ticket
         let owner = app.api.userID
         do {
-            let row = try await app.api.rows("wallets?select=balance&owner_id=eq." + owner).first
+            let ledger = await store.activeLedger()
             guard ticket == read, owner == app.api.userID, !Task.isCancelled else { return }
-            balance = row?["balance"] as? Int
-            balanceError = balance == nil
-            let sandbox = try? await app.api.rows("sandbox_wallets?select=balance&owner_id=eq." + owner)
-            if ticket == read, owner == app.api.userID, !Task.isCancelled, let sandbox {
-                sandboxBalance = sandbox.first?["balance"] as? Int
+            #if DEBUG && targetEnvironment(simulator)
+            if ledger == .local {
+                balance = store.testCredits.reduce(0) { $0 + $1.coins }
+                balanceError = false
+                return
             }
+            #endif
+            let table = ledger == .sandbox ? "sandbox_wallets" : "wallets"
+            let row = try await app.api.rows(table + "?select=balance&owner_id=eq." + owner).first
+            guard ticket == read, owner == app.api.userID, !Task.isCancelled else { return }
+            balance = row?["balance"] as? Int ?? (ledger == .sandbox && row == nil ? 0 : nil)
+            balanceError = balance == nil
         } catch {
             if ticket == read && !Task.isCancelled { balanceError = true; balance = nil }
         }
@@ -141,6 +143,8 @@ private struct WalletActivity: View {
     @EnvironmentObject private var app: MiNaAppModel
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var store: WalletStore
+    var purchasesOnly = false
+    var refreshVersion = 0
     @State private var items: [Entry] = []
     @State private var message = "Loading activity…"
 
@@ -152,50 +156,75 @@ private struct WalletActivity: View {
     }
 
     var body: some View {
-        NavigationStack {
-            List {
-                if !message.isEmpty { Text(message) }
-                ForEach(items) { item in
-                    HStack {
-                        VStack(alignment: .leading) {
-                            Text(item.kind)
-                            Text(item.date.formatted()).font(.caption).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Text(item.amount.formatted(.number.sign(strategy: .always(includingZero: false))))
-                            .monospacedDigit()
+        Group {
+            if purchasesOnly {
+                LazyVStack(alignment: .leading, spacing: 8) {
+                    if !message.isEmpty { Text(message).font(.footnote).foregroundStyle(.secondary) }
+                    ForEach(items) { item in
+                        entryRow(item)
+                            .padding(12)
+                            .background(.white, in: RoundedRectangle(cornerRadius: 12))
                     }
                 }
+            } else {
+                NavigationStack {
+                    List {
+                        if !message.isEmpty { Text(message) }
+                        ForEach(items) { item in entryRow(item) }
+                    }
+                    .navigationTitle("Recent activity").navigationBarTitleDisplayMode(.inline)
+                    .toolbar { Button("Done") { dismiss() } }
+                    .refreshable { await load() }
+                }
             }
-            .navigationTitle("Recent activity").navigationBarTitleDisplayMode(.inline)
-            .toolbar { Button("Done") { dismiss() } }
-            .refreshable { await load() }
-            .task(id: store.revision) { await load() }
         }
+        .task(id: [store.revision, refreshVersion]) { await load() }
+    }
+
+    private func entryRow(_ item: Entry) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.kind)
+                Text(item.date.formatted()).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Text(item.amount.formatted(.number.sign(strategy: .always(includingZero: false))))
+                .font(.headline.monospacedDigit())
+        }.accessibilityElement(children: .combine)
     }
 
     private func load() async {
         do {
             let owner = app.api.userID
             let filter = "&owner_id=eq." + owner + "&order=created_at.desc&limit=50"
-            async let credits = app.api.rows("coin_purchases?select=environment,transaction_id,coins,created_at" + filter)
-            async let debits = app.api.rows("wallet_ledger?select=id,kind,amount,created_at" + filter)
-            let (purchases, spending) = try await (credits, debits)
+            let ledger = await store.activeLedger()
+            #if DEBUG && targetEnvironment(simulator)
+            if ledger == .local {
+                guard owner == app.api.userID, !Task.isCancelled else { return }
+                items = store.testCredits.sorted { $0.date > $1.date }.prefix(50).map {
+                    Entry(id: $0.transaction, kind: "Star coin purchase", amount: $0.coins, date: $0.date)
+                }
+                message = items.isEmpty ? (purchasesOnly ? "No purchases yet." : "No wallet activity yet.") : ""
+                return
+            }
+            #endif
+            let environment = ledger == .sandbox ? "Sandbox" : "Production"
+            let purchases = try await app.api.rows("coin_purchases?select=transaction_id,coins,created_at&environment=eq." + environment + filter)
+            let spending = !purchasesOnly && ledger == .production ? try await app.api.rows("wallet_ledger?select=id,kind,amount,created_at" + filter) : []
             let parser = ISO8601DateFormatter()
             parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
             let seconds = ISO8601DateFormatter()
             let entries: [Entry] = (purchases + spending).compactMap { row in
                 guard let stamp = row["created_at"] as? String, let date = parser.date(from: stamp) ?? seconds.date(from: stamp) else { return nil }
                 if let id = row["transaction_id"] as? String, let coins = row["coins"] as? Int {
-                    let sandbox = row["environment"] as? String == "Sandbox"
-                    return Entry(id: (sandbox ? "sandbox-" : "store-") + id, kind: sandbox ? "Sandbox purchase" : "Star coin purchase", amount: coins, date: date)
+                    return Entry(id: "purchase-" + id, kind: "Star coin purchase", amount: coins, date: date)
                 }
                 guard let id = row["id"] as? String, let amount = row["amount"] as? Int else { return nil }
                 return Entry(id: id, kind: row["kind"] as? String == "send" ? "Gift sent" : "Backpack item", amount: -amount, date: date)
             }
             guard owner == app.api.userID, !Task.isCancelled else { return }
             items = Array(entries.sorted { $0.date > $1.date }.prefix(50))
-            message = items.isEmpty ? "No wallet activity yet." : ""
+            message = items.isEmpty ? (purchasesOnly ? "No purchases yet." : "No wallet activity yet.") : ""
         } catch { if !Task.isCancelled { message = "Activity could not be loaded. Pull to refresh." } }
     }
 }

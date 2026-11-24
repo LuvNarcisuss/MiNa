@@ -6,6 +6,8 @@ struct ProfileScreen: View {
     @EnvironmentObject var app: MiNaAppModel
     let route: NativeRoute
     @State private var profile: ProfileRecord = [:]
+    @Environment(\.scenePhase) private var phase
+    @State private var isFriend = false
     @State private var edges: [ProfileRecord] = []
     @State private var people: [ProfileRecord] = []
     @State private var balance: Int?
@@ -49,9 +51,13 @@ struct ProfileScreen: View {
     private var following: Set<String> { Set(edges.filter { $0["follower_id"] as? String == other }.compactMap { $0["followed_id"] as? String }) }
     private var followers: Set<String> { Set(edges.filter { $0["followed_id"] as? String == other }.compactMap { $0["follower_id"] as? String }) }
     private let lists = ["profile.following","profile.followers","profile.friends","profile.blocked","profile.search"]
-    private let menus = [("Blocked users","profile.blocked",10), ("Privacy settings","profile.privacy",11),
-                         ("Terms of use","legal.terms",12), ("My level","level",13), ("Store & backpack","store",14),
-                         ("Contact us","support",16), ("Community guidelines","legal.guidelines",17), ("Delete account","delete",15)]
+    private let menus: [(title: String, route: String, artwork: Int?)] = [
+        ("Blocked users", "profile.blocked", 10), ("Report history", "profile.reports", nil),
+        ("Privacy settings", "profile.privacy", 11), ("Terms of use", "legal.terms", 12),
+        ("My level", "level", 13), ("Store & backpack", "store", 14),
+        ("Contact us", "support", 16), ("Community guidelines", "legal.guidelines", 17),
+        ("Delete account", "delete", 15)
+    ]
 
     var body: some View {
         Group {
@@ -72,7 +78,14 @@ struct ProfileScreen: View {
                     .padding(10).background(.regularMaterial)
             }
         }
-        .task(id: "\(route)-\(app.safetyRevision)") { await load() }
+        .task(id: "\(route)-\(app.safetyRevision)-\(route.name != "person" || phase == .active)") {
+            guard route.name != "person" || phase == .active else { return }
+            await load()
+            while route.name == "person", !Task.isCancelled {
+                do { try await Task.sleep(nanoseconds: 10_000_000_000) } catch { return }
+                await updateFriendship()
+            }
+        }
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $reportOpen) {
             Form {
@@ -158,27 +171,33 @@ struct ProfileScreen: View {
                     }.overlay(alignment: .trailing) { NativeArt("profile",8).scaledToFit().frame(width: 84).padding(.trailing,8) }
                 }.accessibilityLabel("My wallet")
                 Text("More settings").font(.headline).frame(maxWidth: .infinity,alignment: .leading)
-                ForEach(menus.indices, id: \.self) { index in
-                    let item = menus[index]
-                    Button { app.go(item.1) } label: {
-                        if item.1 == "profile.privacy" {
-                            HStack(spacing: 8) {
-                                GeometryReader { _ in
-                                    NativeArt("profile", item.2).frame(width: 350, height: 54)
-                                }.frame(width: 52, height: 54).clipped()
-                                Text(item.0).font(.body).foregroundStyle(.secondary)
-                                Spacer()
-                            }.background(.white, in: RoundedRectangle(cornerRadius: 8))
-                        } else {
-                            NativeArt("profile",item.2).scaledToFit()
+                ForEach(menus, id: \.route) { item in
+                    Button { app.go(item.route) } label: {
+                        HStack(spacing: 14) {
+                            if let artwork = item.artwork {
+                                // The source rows are 350 by 54 points, with their icon centered at (30, 27).
+                                NativeArt("profile", artwork).frame(width: 350, height: 54)
+                                    .offset(x: -16, y: -13)
+                                    .frame(width: 28, height: 28, alignment: .topLeading).clipped()
+                            } else {
+                                Image(systemName: "flag.fill").font(.system(size: 18, weight: .medium))
+                                    .foregroundStyle(Color(red: 0.07, green: 0.47, blue: 0.50))
+                                    .frame(width: 28, height: 28)
+                            }
+                            Text(item.title).font(.body.weight(.semibold))
+                                .foregroundStyle(item.route == "delete" ? Color(red: 0.65, green: 0.12, blue: 0.26)
+                                                 : Color(red: 0.08, green: 0.19, blue: 0.25))
+                            Spacer(minLength: 4)
+                            Image(systemName: "chevron.right").font(.footnote.bold())
+                                .foregroundStyle(Color(red: 0.22, green: 0.42, blue: 0.46))
                         }
-                    }.accessibilityLabel(item.0)
-                    if item.1 == "profile.blocked" {
-                        Button { app.go("profile.reports") } label: {
-                            Label("Report history", systemImage: "flag").frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-                                .padding(.horizontal).background(.white, in: RoundedRectangle(cornerRadius: 8))
-                        }
+                        .padding(.horizontal, 16).padding(.vertical, 8)
+                        .frame(maxWidth: .infinity, minHeight: 54, alignment: .leading)
+                        .background(.white, in: RoundedRectangle(cornerRadius: 18))
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(item.title)
                 }
                 Button { app.go("logout") } label: { NativeArt("profile",18).scaledToFit().frame(width: 175,height: 44) }.accessibilityLabel("Sign out")
             }.padding(.horizontal,16).padding(.bottom)
@@ -208,9 +227,13 @@ struct ProfileScreen: View {
                         }
                     VStack(alignment: .leading, spacing: 10) {
                         HStack(spacing: 12) {
-                            Button { app.go("messages.thread", other) } label: {
+                            Button { Task { await perform {
+                                await updateFriendship()
+                                if isFriend { app.go("messages.thread", other) }
+                            } } } label: {
                                 NativeArt("publicProfile", 4).scaledToFit()
-                            }.accessibilityLabel("Chat").disabled(profile["allow_messages"] as? Bool == false)
+                            }.grayscale(isFriend ? 0 : 1).opacity(isFriend ? 1 : 0.45)
+                            .accessibilityLabel("Chat").disabled(!isFriend || busy)
                             followButton
                         }
                         HStack(spacing: 18) {
@@ -509,6 +532,7 @@ struct ProfileScreen: View {
             try Task.checkCancellation()
             guard loadID == version else { return }
             profile = remote
+            if route.name == "person" { await updateFriendship() }
             if route.name == "profile", owner == me, !remote.isEmpty {
                 do { try cacheProfile(remote) } catch { notice = "Your profile loaded. Its copy on this iPhone could not be updated." }
             }
@@ -540,7 +564,7 @@ struct ProfileScreen: View {
                 guard loadID == version, !Task.isCancelled else { return }
                 people = results
             }
-        } catch { if !Task.isCancelled && loadID == version { notice = error.localizedDescription } }
+        } catch { if !Task.isCancelled && loadID == version { isFriend = false; notice = error.localizedDescription } }
         if loadID == version && !Task.isCancelled { ready = true }
     }
 
@@ -549,6 +573,13 @@ struct ProfileScreen: View {
         busy = true; notice = ""
         defer { busy = false }
         do { try await action() } catch { notice = error.localizedDescription }
+    }
+
+    @MainActor private func updateFriendship() async {
+        let owner = other
+        let value = (try? await app.api.isChatFriend(owner)) ?? false
+        guard !Task.isCancelled, other == owner else { return }
+        isFriend = value
     }
 
     private func toggleFollow() async {

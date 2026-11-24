@@ -187,6 +187,13 @@ final class MiNaAPI {
         return receipt
     }
 
+    func isChatFriend(_ peer: String) async throws -> Bool {
+        guard let result = try await rest("rpc/is_chat_friend", method: "POST", body: ["p_peer": peer]) as? Bool else {
+            throw MiNaIssue("Could not verify this friendship.")
+        }
+        return result
+    }
+
     func rows(_ path: String) async throws -> [[String: Any]] {
         guard let result = try await rest(path) as? [[String: Any]] else { throw MiNaIssue("The records could not be read.") }
         return result

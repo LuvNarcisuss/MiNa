@@ -288,8 +288,11 @@ struct MiNaRoot: View {
                     HStack(spacing: 0) {
                         ForEach(tabs.indices, id: \.self) { index in
                             let item = tabs[index]
+                            let highlighted = item.2 == 5 || app.tab == item.0
                             Button { app.tab = item.0 } label: {
-                                NativeArt("tabs", item.2 == 5 || app.tab == item.0 ? item.2 : item.2 + 5)
+                                NativeArt("tabs", highlighted ? item.2 : item.2 + 5)
+                                    .renderingMode(highlighted ? .original : .template)
+                                    .foregroundStyle(Color(red: 0.34, green: 0.41, blue: 0.48))
                                     .scaledToFit().frame(width: item.2 == 5 ? 41 : 24, height: 44)
                                     .frame(maxWidth: .infinity).contentShape(Rectangle())
                             }
@@ -359,11 +362,9 @@ private struct WelcomeScreen: View {
                         .foregroundStyle(.white)
                         .shadow(color: midnight.opacity(0.55), radius: 8, y: 3)
                         .accessibilityAddTraits(.isHeader)
-                    if app.entryMode == .link {
-                        Text("Keep the rooms, posts and coins from your account on this iPhone.")
-                            .font(.subheadline).multilineTextAlignment(.center).padding(.top, 6)
-                    }
                     VStack(spacing: 12) {
+                        if app.entryMode == .link { modeButton("Sign in", .signIn) }
+                        else if app.hasLegacyAccount { modeButton("Link account", .link) }
                         VStack(spacing: 0) {
                             credentialRow("Email", fieldID: .email) {
                                 TextField("", text: $email, prompt: fieldPrompt("you@example.com"))
@@ -407,8 +408,6 @@ private struct WelcomeScreen: View {
                             )
                         }
                         .disabled(!canSubmit).opacity(canSubmit || app.busy ? 1 : 0.72)
-                        if app.entryMode != .signIn { modeButton("Sign in to an existing account", .signIn) }
-                        if app.hasLegacyAccount && app.entryMode != .link { modeButton("Link my previous account", .link) }
                     }
                     .padding(.top, 22)
                     .disabled(app.busy)
