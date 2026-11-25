@@ -6,20 +6,21 @@ import UIKit
 import UniformTypeIdentifiers
 
 final class DeviceMedia: NSObject, PHPickerViewControllerDelegate, UIDocumentPickerDelegate,
-                         AVAudioRecorderDelegate, AVAudioPlayerDelegate {
+                         AVAudioRecorderDelegate {
     typealias Payload = [String: Any]
     typealias Completion = (Result<Payload, Error>) -> Void
     private let fs = FileManager.default
     private let audio = AVAudioSession.sharedInstance()
     private let imports = DispatchQueue(label: "com.mina.media-import")
     private var recorder: AVAudioRecorder?
-    private var player: AVAudioPlayer?
-    private var playerID: String?
     private var previousCallCategory: (AVAudioSession.Category, AVAudioSession.Mode, AVAudioSession.CategoryOptions)?
     private var recordingRequest: (id: UUID, granted: Bool, completion: Completion)?
     private var kind = ""
     private var pickerReply: Completion?
-    private var mediaDirectory: URL { AccountLibrary.library.appendingPathComponent("Media", isDirectory: true) }
+    private var mediaDirectory: URL {
+        fs.temporaryDirectory.appendingPathComponent("MiNaCapture", isDirectory: true)
+            .appendingPathComponent(AccountLibrary.owner, isDirectory: true)
+    }
     private var recentTake: URL { AccountLibrary.library.appendingPathComponent("last-recording.txt") }
     private var pendingTake: URL { AccountLibrary.library.appendingPathComponent("pending-recording.txt") }
 
@@ -46,11 +47,12 @@ final class DeviceMedia: NSObject, PHPickerViewControllerDelegate, UIDocumentPic
 
     private func background() {
         if recorder != nil { _ = try? finishRecording() }
-        stopPlayback()
     }
 
     private func directory(_ id: String) throws -> URL {
         guard let uuid = UUID(uuidString: id), uuid.uuidString == id else { throw MiNaIssue("This media item is unavailable.") }
+        let legacy = AccountLibrary.library.appendingPathComponent("Media").appendingPathComponent(id)
+        if fs.fileExists(atPath: legacy.path) { return legacy }
         return mediaDirectory.appendingPathComponent(id, isDirectory: true)
     }
 
@@ -76,14 +78,11 @@ final class DeviceMedia: NSObject, PHPickerViewControllerDelegate, UIDocumentPic
             let seconds = AVURLAsset(url: file).duration.seconds
             if seconds.isFinite { value["duration"] = seconds }
         }
-        let cover = file.deletingLastPathComponent().appendingPathComponent("cover.jpg")
-        if fs.fileExists(atPath: cover.path) { value["cover"] = cover.absoluteString }
         return value
     }
 
     func remove(_ id: String) throws {
         let url = try directory(id)
-        if playerID == id { stopPlayback() }
         if recorder?.url.deletingLastPathComponent() == url { throw MiNaIssue("Finish this recording before removing it.") }
         if fs.fileExists(atPath: url.path) { try fs.removeItem(at: url) }
     }
@@ -96,6 +95,7 @@ final class DeviceMedia: NSObject, PHPickerViewControllerDelegate, UIDocumentPic
     func clear() throws {
         guard pickerReply == nil, recordingRequest == nil else { throw MiNaIssue("Finish the media selection first.") }
         background()
+        if fs.fileExists(atPath: mediaDirectory.path) { try fs.removeItem(at: mediaDirectory) }
         if fs.fileExists(atPath: AccountLibrary.library.path) {
             try fs.removeItem(at: AccountLibrary.library)
         }
@@ -193,13 +193,7 @@ final class DeviceMedia: NSObject, PHPickerViewControllerDelegate, UIDocumentPic
                       [UTType.mpeg4Movie, UTType.quickTimeMovie].contains(type),
                       let ext = type.preferredFilenameExtension else { throw MiNaIssue("Choose a playable MP4 or MOV video.") }
                 try fs.copyItem(at: source, to: folder.appendingPathComponent("asset.\(ext)"))
-                let generator = AVAssetImageGenerator(asset: video)
-                generator.appliesPreferredTrackTransform = true
-                generator.maximumSize = CGSize(width: 960, height: 960)
-                if let image = try? generator.copyCGImage(at: .zero, actualTime: nil),
-                   let data = UIImage(cgImage: image).jpegData(compressionQuality: 0.82) {
-                    try data.write(to: folder.appendingPathComponent("cover.jpg"), options: .atomic)
-                }
+
             }
             return try resolve(id)
         } catch {
@@ -247,7 +241,6 @@ final class DeviceMedia: NSObject, PHPickerViewControllerDelegate, UIDocumentPic
     }
 
     private func startTake() throws -> Payload {
-        stopPlayback()
         let folder = try directory(UUID().uuidString)
         try fs.createDirectory(at: folder, withIntermediateDirectories: true)
         do {
@@ -258,6 +251,7 @@ final class DeviceMedia: NSObject, PHPickerViewControllerDelegate, UIDocumentPic
                 AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
             ])
             take.delegate = self
+            try fs.createDirectory(at: AccountLibrary.library, withIntermediateDirectories: true)
             try folder.lastPathComponent.write(to: pendingTake, atomically: true, encoding: .utf8)
             guard take.record(forDuration: 60) else { throw MiNaIssue("The microphone could not start recording.") }
             recorder = take
@@ -331,26 +325,6 @@ final class DeviceMedia: NSObject, PHPickerViewControllerDelegate, UIDocumentPic
         return ["id": id, "duration": min(seconds, 60), "recording": recorder?.isRecording ?? false]
     }
 
-    func play(_ id: String) throws -> Payload {
-        guard recorder == nil else { throw MiNaIssue("Stop the recording before listening.") }
-        stopPlayback()
-        let url = try asset(id)
-        guard url.pathExtension == "m4a" else { throw MiNaIssue("This item is not a voice recording.") }
-        do {
-            try audio.setCategory(.playback)
-            try audio.setActive(true)
-            let next = try AVAudioPlayer(contentsOf: url)
-            next.delegate = self
-            guard next.play() else { throw MiNaIssue("This recording could not be played.") }
-            player = next
-            playerID = id
-            return playbackStatus()
-        } catch {
-            try? audio.setActive(false, options: .notifyOthersOnDeactivation)
-            throw error
-        }
-    }
-
     func setCallSpeaker(enabled: Bool, ending: Bool) throws -> Payload {
         guard recorder == nil else { throw MiNaIssue("Finish recording before changing the call output.") }
         if enabled, audio.category != .playAndRecord {
@@ -370,20 +344,4 @@ final class DeviceMedia: NSObject, PHPickerViewControllerDelegate, UIDocumentPic
         return ["speaker": speaker]
     }
 
-    func playbackStatus() -> Payload {
-        ["playing": player?.isPlaying ?? false, "id": playerID as Any? ?? NSNull(), "position": player?.currentTime ?? 0,
-         "duration": player?.duration ?? 0]
-    }
-
-    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
-        if self.player === player { stopPlayback() }
-    }
-
-    func stopPlayback() {
-        guard player != nil else { return }
-        player?.stop()
-        player = nil
-        playerID = nil
-        try? audio.setActive(false, options: .notifyOthersOnDeactivation)
-    }
 }

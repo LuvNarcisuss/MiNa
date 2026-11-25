@@ -48,7 +48,6 @@ struct CommunityMedia: View {
     let path: String
     let duration: Double
     let voice: Bool
-    let remote: Bool
     var caption: String?
     var liked = false
     var onLike: (() -> Void)?
@@ -65,7 +64,7 @@ struct CommunityMedia: View {
             if !voice {
                 video
             } else if !model.failure.isEmpty {
-                VStack { Text(model.failure); Button("Try again") { attempt += 1 } }
+                Button("Try again") { attempt += 1 }
             } else if let player = model.player {
                 Button {
                     if model.playing { player.pause() } else { player.play() }
@@ -81,17 +80,12 @@ struct CommunityMedia: View {
                     }.foregroundStyle(.white).padding(.horizontal,14).frame(minHeight:60).background(Color(red:0.52,green:0.61,blue:0.62), in: RoundedRectangle(cornerRadius:12))
                 }.accessibilityLabel(model.playing ? "Pause recording" : "Play recording")
             } else { ProgressView("Opening recording…") }
-        }.task(id: mediaRequest) {
+        }.minaAlert(model.failure).task(id: mediaRequest) {
             if model.player != nil && openedRequest == mediaRequest { return }
             nativeControls = false
             model.close()
             do {
-                let url: URL
-                if remote { url = try await app.api.mediaURL(path) }
-                else {
-                    guard let location = try app.media.resolve(path)["url"] as? String, let file = URL(string: location) else { throw MiNaIssue("This media is unavailable.") }
-                    url = file
-                }
+                let url = try await app.api.mediaURL(path)
                 try Task.checkCancellation()
                 model.open(url)
                 openedRequest = mediaRequest
@@ -105,7 +99,6 @@ struct CommunityMedia: View {
             .overlay {
                 if !model.failure.isEmpty {
                     VStack {
-                        Text(model.failure).font(.footnote).multilineTextAlignment(.center)
                         Button("Try again") { attempt += 1 }
                     }.foregroundStyle(.white).padding(.horizontal)
                 } else if let player = model.player {

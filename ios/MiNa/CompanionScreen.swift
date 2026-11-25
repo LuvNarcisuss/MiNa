@@ -133,7 +133,6 @@ private struct CompanionConversation: View {
                         }.padding(.vertical, 8)
                     }.onChange(of: lines.count) { _ in if !lines.isEmpty { proxy.scrollTo(lines.count - 1, anchor: .bottom) } }
                 }
-                if !failure.isEmpty { Text(failure).font(.footnote).foregroundStyle(.red) }
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(prompts, id: \.self) { idea in
                         Button(idea) { update(idea) }.font(.footnote)
@@ -182,6 +181,7 @@ private struct CompanionConversation: View {
         }
         .background { NativeArt("aiChat", 1).ignoresSafeArea() }
         .toolbar(.hidden, for: .navigationBar)
+        .minaAlert(failure)
         .onAppear {
             lines = app.state("companion.history") as? [[String: String]] ?? []
             prompt = app.state("companion.draft") as? String ?? ""

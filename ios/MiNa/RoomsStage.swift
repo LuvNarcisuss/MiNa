@@ -188,7 +188,7 @@ struct RoomStageFrame<Bottom: View>: View {
                 Button { open(.host,0) } label: {
                     VStack(spacing: 4) {
                         ZStack { Circle().fill(.teal.opacity(0.45))
-                            if let portrait = hostPortrait { AsyncImage(url: portrait) { image in image.resizable().scaledToFill() } placeholder: { RoomArtwork(cover) }.frame(width: hostSize - 10,height: hostSize - 10).clipShape(Circle()) }
+                            if let portrait = hostPortrait { CloudPortraitImage(url: portrait) { image in image.resizable().scaledToFill() } placeholder: { RoomArtwork(cover) }.frame(width: hostSize - 10,height: hostSize - 10).clipShape(Circle()) }
                             else { RoomArtwork(cover).scaledToFill().frame(width: hostSize - 10,height: hostSize - 10).clipShape(Circle()) }
                         }.frame(width: hostSize,height: hostSize)
                         Text(host).font(.headline).lineLimit(1); Text(hostStatus).font(.caption).lineLimit(1)
@@ -204,7 +204,7 @@ struct RoomStageFrame<Bottom: View>: View {
                                         Circle().fill(.white.opacity(0.18))
                                         Text(String(person.name.prefix(1))).bold()
                                         if let url = person.portrait {
-                                            AsyncImage(url: url) { $0.resizable().scaledToFill() } placeholder: { Color.clear }
+                                            CloudPortraitImage(url: url) { $0.resizable().scaledToFill() } placeholder: { Color.clear }
                                         }
                                     }.frame(width: compact ? 28 : 34, height: compact ? 28 : 34).clipShape(Circle())
                                     Text(person.name).font(.caption.bold()).lineLimit(1)
@@ -219,7 +219,7 @@ struct RoomStageFrame<Bottom: View>: View {
                         Button { open(.mic,seat) } label: { VStack(spacing: 5) {
                             ZStack {
                                 Circle().fill(.white.opacity(0.16)).overlay { Circle().stroke(.white.opacity(0.20)) }
-                                if let portrait = portraits[seat] { AsyncImage(url: portrait) { image in image.resizable().scaledToFill() } placeholder: { Color.clear }.clipShape(Circle()) }
+                                if let portrait = portraits[seat] { CloudPortraitImage(url: portrait) { image in image.resizable().scaledToFill() } placeholder: { Color.clear }.clipShape(Circle()) }
                                 else if let name = seats[seat] { Text(String(name.prefix(2))).bold() }
                                 else { NativeArt("room",7).scaledToFit().padding(13) }
                             }.frame(width: seatSize,height: seatSize)
@@ -269,7 +269,6 @@ struct RoomLocalStage: View {
                 let title = draft?.roomText("title") ?? sound.title
                 RoomStageFrame(title: title,topic: draft?.roomText("topic") ?? sound.topic,cover: sound.id,host: draft == nil ? "Host seat" : (app.state("profile") as? RoomRow)?.roomText("name") ?? "You",hostStatus: draft == nil ? "Unoccupied" : "Draft owner",open: { next, n in seat = n; panel = next }) {
                     VStack(spacing: 12) {
-                        Text("ON THIS DEVICE").font(.caption)
                         Text(RoomSound.find(player.playing)?.title ?? sound.title).font(.title2.bold())
                         Text(RoomSound.find(player.playing)?.detail ?? sound.detail)
                         HStack {
@@ -279,7 +278,6 @@ struct RoomLocalStage: View {
                                 do { try app.save("room.savedSounds", saved.contains(id) ? saved.filter { $0 != id } : saved + [id]) } catch { self.error = error.localizedDescription }
                             } }
                         }.buttonStyle(.borderedProminent)
-                        if !(error + player.error).isEmpty { Text(error + player.error).font(.caption) }
                     }.frame(maxWidth: .infinity).padding().background(.black.opacity(0.25), in: RoundedRectangle(cornerRadius: 18))
                 }
                 .roomOverlay($panel) { item in
@@ -287,15 +285,14 @@ struct RoomLocalStage: View {
                         switch item {
                         case .host:
                             HStack(spacing: 12) { RoomArtwork(sound.id).scaledToFill().frame(width: 50,height: 50).clipShape(Circle()); Text(title).bold() }
-                            Text(draft == nil ? "Offline soundscape · No live host" : "Private draft · " + (draft?.roomText("visibility") ?? ""))
+                            Text(draft == nil ? "Soundscape · No live host" : "Private draft · " + (draft?.roomText("visibility") ?? ""))
                             Button(draft == nil ? "Browse soundscapes" : "View your profile") { if draft == nil { panel = .music } else { panel = nil; app.go("profile") } }.buttonStyle(RoomCapsuleStyle())
                         case .audience, .chat: RoomEmptyPanel(title: "No live audience",detail: "Participants and comments appear in live rooms.")
-                        case .share: RoomEmptyPanel(title: "This room is on your device",detail: "Open a live room to invite a friend.")
+                        case .share: RoomEmptyPanel(title: "This soundscape has no live room",detail: "Open a live room to invite a friend.")
                         case .mic: HStack { NativeArt("queue",7).scaledToFit().frame(width: 60,height: 60); Text("Microphone seat \(seat)").bold() }; RoomEmptyPanel(title: "Microphone off",detail: "Open a live room to request a seat or join the queue.")
                             Button("Browse sounds") { panel = .music }.buttonStyle(RoomCapsuleStyle())
                         case .music:
                             ForEach(RoomSound.all) { s in RoomMusicRow(sound: s,button: player.playing == s.id ? "Pause" : "Play") { if player.playing == s.id { player.stop() } else { player.play(s) } } }
-                            if !player.error.isEmpty { Text(player.error) }
                         case .gift:
                             RoomGiftCatalog(choices: Array(RoomGifts.names.indices),selected: gift,price: { _ in nil },select: { gift = $0 })
                             Stepper("Quantity: \(quantity)",value: $quantity,in: 1...99)
@@ -307,8 +304,8 @@ struct RoomLocalStage: View {
                         }
                     } }
                 }
-            } else { Text("This room is unavailable.") }
-        }.onChange(of: phase) { if $0 != .active { player.stop() } }.onDisappear { player.stop() }
+            } else { Color.clear.minaAlert("This room is unavailable.") }
+        }.minaAlert(error).minaAlert(player.error).onChange(of: phase) { if $0 != .active { player.stop() } }.onDisappear { player.stop() }
         .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification)) { _ in player.stop() }
     }
 }
@@ -367,7 +364,7 @@ struct RoomRankings: View {
             } }.padding(.top,12).background(alignment: .bottom) { NativeArt("rank",5).scaledToFit().accessibilityHidden(true) }
             ForEach(Array(rows.dropFirst(3).enumerated()),id: \.offset) { i,row in HStack { Text("\(i+4). " + (titles[row.roomText("room_id")] ?? "Room")); Spacer(); Text("\(row["score"] as? Int ?? 0)") } }
             if rows.isEmpty && error.isEmpty { Text(ready ? "No ranked rooms for this period." : "Loading rankings…") }
-            if !error.isEmpty { Text(error); Button("Retry") { version += 1 } }
+            if !error.isEmpty { Button("Retry") { error = ""; version += 1 } }
             if let room {
                 Text("This room").font(.headline)
                 Text(rows.firstIndex(where: { $0.roomText("room_id") == room }).map { "Rank \($0+1)" } ?? "Unranked")
@@ -379,7 +376,7 @@ struct RoomRankings: View {
                     }.disabled(!ready || busy || days.contains(day(Date()))) }
                 }
             } else { Button("Find a room to check in") { app.go("rooms.liveList") }.buttonStyle(RoomCapsuleStyle()) }
-        }.padding() }.background { ZStack { Color(red: 0.9,green: 0.99,blue: 1); NativeArt("rank",2) }.ignoresSafeArea() }.navigationTitle("Rankings").navigationBarTitleDisplayMode(.inline).task(id: "\(gift)-\(last)-\(version)") {
+        }.padding() }.background { ZStack { Color(red: 0.9,green: 0.99,blue: 1); NativeArt("rank",2) }.ignoresSafeArea() }.minaAlert(error).navigationTitle("Rankings").navigationBarTitleDisplayMode(.inline).task(id: "\(gift)-\(last)-\(version)") {
             ready = false; rows = []; days = []; error = ""
             do {
                 let start = day(dates[0])

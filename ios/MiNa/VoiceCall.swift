@@ -25,7 +25,6 @@ struct IncomingCallBanner: View {
             if let call, route.name != "messages.call", phase == .active {
                 VStack {
                     Text("\(name) is calling").bold()
-                    if !error.isEmpty { Text(error).font(.caption) }
                     HStack {
                         Button("Decline", role: .destructive) { Task {
                             do { _ = try await callAction(app.api,call.id,"decline"); self.call = nil }
@@ -43,6 +42,7 @@ struct IncomingCallBanner: View {
                 }
             }
         }
+        .minaAlert(error)
         .task(id: phase) {
             guard phase == .active else { return }
             while !Task.isCancelled {
@@ -160,9 +160,7 @@ struct VoiceCallScreen: View {
             ZStack { NativeArt("call",4).frame(width:260,height:260); InboxAvatar(person:person,size:177) }
             Text(person?.string("name") ?? "Voice call").font(.title.bold())
             if let connectedAt { Text(connectedAt,style:.timer).monospacedDigit() } else { Text(label) }
-            if !error.isEmpty { Text(error).font(.footnote).multilineTextAlignment(.center) }
             if !endingError.isEmpty {
-                Text(endingError).font(.footnote).multilineTextAlignment(.center)
                 Button("Retry confirmation") { confirmEnd() }.disabled(confirmingEnd)
             }
             Spacer()
@@ -186,6 +184,8 @@ struct VoiceCallScreen: View {
                 }
             }.padding(.bottom,30)
         }.padding(.horizontal, 14).background { NativeArt("call",1).ignoresSafeArea() }.toolbar(.hidden, for: .navigationBar)
+        .minaAlert(error)
+        .minaAlert(endingError)
         .task {
             while !Task.isCancelled {
                 await synchronize()
@@ -218,6 +218,7 @@ struct VoiceCallScreen: View {
 
     @MainActor private func confirmEnd() {
         guard let action = endingAction, !confirmingEnd else { return }
+        endingError = ""
         confirmingEnd = true
         Task {
             defer { confirmingEnd = false }

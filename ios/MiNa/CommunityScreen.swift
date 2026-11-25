@@ -44,10 +44,7 @@ struct CommunityScreen: View {
     }
 }
 
-private let readings = [
-    ("journal-moon-window","A window left open","For a moment, the whole street was quiet enough to hear the curtains move.","Across the courtyard, one window stayed lit. A spoon touched the side of a cup, then the light went out. The curtains lifted again. For once, there was nothing else I needed to do.","moon-seat"),
-    ("journal-falling-star","One last star","I watched a small light cross the sky and forgot to make a wish.","Maybe it was a plane. Maybe someone in a window seat was watching the lights below, trying to guess which one was home. I pulled the blanket to my chin and let the thought drift on.","star-pillow")
-]
+private var readings: [JournalStory] { CloudInterface.library?.stories ?? [] }
 
 private struct CommunityReportTarget: Identifiable {
     let id: String
@@ -77,7 +74,6 @@ private struct CommunityListing: View {
     @State private var more = false
     @State private var loaded = false
     @State private var failure = ""
-    @State private var message = ""
     @State private var revision = 0
     @State private var text = ""
     @State private var emoji = false
@@ -109,8 +105,8 @@ private struct CommunityListing: View {
     }
     private var readIndices: [Int] {
         readings.indices.filter { i in
-            if name == "feed.read" { return readings[i].0 == route.id }
-            return name == "feed" && !following && (query.isEmpty || [readings[i].1,readings[i].2,"MiNa Journal"].contains { $0.localizedCaseInsensitiveContains(query) })
+            if name == "feed.read" { return readings[i].id == route.id }
+            return name == "feed" && !following && (query.isEmpty || [readings[i].title,readings[i].summary,"MiNa Journal"].contains { $0.localizedCaseInsensitiveContains(query) })
         }
     }
     var body: some View {
@@ -120,7 +116,6 @@ private struct CommunityListing: View {
                 LazyVStack(alignment: .leading, spacing: 14) {
                     controls
                     if !failure.isEmpty {
-                        Text(failure)
                         Button("Try again") { revision += 1 }
                     } else if (!loaded || loadedSafetyRevision != app.safetyRevision) && name != "feed.read" { ProgressView("Loading…") }
                     if name != "feed.post" {
@@ -183,6 +178,7 @@ private struct CommunityListing: View {
                     .padding(.trailing, 20).padding(.bottom, 20)
             }
         }
+        .minaAlert(failure)
         .onAppear { if name == "feed.likes" { likes = true } }
         .onChange(of: "\(following)|\(likes)|\(query)") { _ in rows = []; more = false; loaded = false; failure = "" }
         .onChange(of: scenePhase) { phase in if phase == .active { revision += 1 } }
@@ -205,13 +201,12 @@ private struct CommunityListing: View {
         }) { target in
             CommunityReportSheet(target: target) { reportAccepted(target) }
         }
-        .alert("MiNa", isPresented: Binding(get: { !message.isEmpty }, set: { if !$0 { message = "" } })) { Button("OK") {} } message: { Text(message) }
     }
     private func entry(_ row: CommunityRow) -> some View {
         let owner = row.communityString("owner_id")
         return CommunityEntry(row: row, profile: profiles[owner] ?? [:], followed: follows.contains(owner),
                               detail: detail, mine: mine, detailOptions: $postOptions,
-                              update: { revision += 1 }, issue: { message = $0 },
+                              update: { revision += 1 }, issue: { AppAlerts.shared.show($0) },
                               report: openReport, removed: { removeEntry(row.communityString("id")) })
             .id(row.communityString("id"))
     }
@@ -329,17 +324,17 @@ private struct CommunityListing: View {
         let story = readings[i]
         return VStack(alignment: .leading, spacing: 10) {
             HStack { NativeArt("icon", 1).scaledToFill().frame(width: 42, height: 42).clipShape(Circle()); VStack(alignment: .leading) { Text("MiNa Journal").bold(); Text("Bedtime reading").font(.caption) } }
-            Text(story.2)
-            Button { if name != "feed.read" { app.go("feed.read", story.0) } } label: {
+            Text(story.summary)
+            Button { if name != "feed.read" { app.go("feed.read", story.id) } } label: {
                 Color.clear.frame(maxWidth: .infinity).frame(height: 220)
-                    .overlay { nativeArtwork("rooms-extra",story.4).scaledToFill() }
+                    .overlay { nativeArtwork("rooms-extra",story.cover).scaledToFill() }
                     .clipShape(RoundedRectangle(cornerRadius:16))
                     .overlay(alignment:.bottomLeading) {
-                        Text(story.1).font(.headline).padding(9).background(.ultraThinMaterial,in:Capsule()).padding()
+                        Text(story.title).font(.headline).padding(9).background(.ultraThinMaterial,in:Capsule()).padding()
                     }
                     .contentShape(RoundedRectangle(cornerRadius:16))
             }.buttonStyle(.plain)
-            if name == "feed.read" { Text(story.3) }
+            if name == "feed.read" { Text(story.body) }
         }.padding(.vertical,8).overlay(alignment: .bottom) { Divider() }
     }
 
@@ -406,7 +401,7 @@ private struct CommunityListing: View {
                                  replyID = note.id
                                  replyName = memberName(owner)
                                  editingComment = true
-                             }, report: openReport, issue: { message = $0 })
+                             }, report: openReport, issue: { AppAlerts.shared.show($0) })
         }
     }
 
@@ -442,7 +437,7 @@ private struct CommunityListing: View {
                 emoji = false
                 editingComment = false
                 revision += 1
-            } catch { message = error.localizedDescription }
+            } catch { AppAlerts.shared.show(error.localizedDescription) }
         }
     }
 
@@ -497,7 +492,7 @@ private struct CommunityOwner: View {
                 ZStack {
                     Circle().fill(Color.mint.opacity(0.2))
                     Text(String(name.prefix(1))).bold()
-                    if let avatar { AsyncImage(url: avatar) { image in image.resizable().scaledToFill() } placeholder: { Color.clear } }
+                    if let avatar { CloudPortraitImage(url: avatar) { image in image.resizable().scaledToFill() } placeholder: { Color.clear } }
                 }.frame(width: avatarSize, height: avatarSize).clipShape(Circle())
                 if avatarSize == 24 {
                     Text(name).font(.subheadline.weight(.medium))
@@ -608,13 +603,13 @@ private struct CommunityReportSheet: View {
                         .onChange(of: details) { value in
                             if value.count > 950 { details = String(value.prefix(950)) }
                         }
-                    if !failure.isEmpty { Text(failure).font(.footnote).foregroundStyle(.red) }
                     Button("Submit report", action: submit).buttonStyle(.borderedProminent)
                     Button("Cancel") { dismiss() }
                 }
             }.padding(22).frame(maxWidth: .infinity, alignment: .leading).disabled(busy)
         }
         .background { NativeArt("activity",1).ignoresSafeArea() }
+        .minaAlert(failure)
         .presentationDetents([.medium,.large])
         .interactiveDismissDisabled(busy)
     }
@@ -678,7 +673,7 @@ private struct CommunityEntry: View {
     }
     private var entryMedia: some View {
         CommunityMedia(path: row.communityString("media_path"), duration: row.communitySeconds("duration"),
-                       voice: dream, remote: true, caption: postDetail ? caption : nil, liked: liked,
+                       voice: dream, caption: postDetail ? caption : nil, liked: liked,
                        onLike: postDetail ? { toggle("like", liked) } : nil,
                        openPost: detail || dream ? nil : { open() })
     }

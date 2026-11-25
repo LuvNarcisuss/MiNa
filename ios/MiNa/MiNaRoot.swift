@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 struct NativeRoute: Hashable {
     let name: String
@@ -7,11 +8,12 @@ struct NativeRoute: Hashable {
 }
 
 enum EntryMode {
-    case signIn, link
+    case signIn, signUp, link
 
     var title: String {
         switch self {
         case .signIn: return "Sign in"
+        case .signUp: return "Create account"
         case .link: return "Link this account"
         }
     }
@@ -20,20 +22,31 @@ enum EntryMode {
 @MainActor
 final class MiNaAppModel: ObservableObject {
     let api: MiNaAPI
+    let gifts: GiftSpending
     let wallet: WalletStore
 
     init() {
         let api = MiNaAPI()
         self.api = api
-        self.wallet = WalletStore(api: api)
+        let wallet = WalletStore()
+        self.wallet = wallet
+        self.gifts = GiftSpending(wallet: wallet, api: api)
+        api.sessionExpired = { [weak self] in
+            guard let self, self.signedIn else { return false }
+            try? self.media.prepareAccountChange()
+            self.closeSession()
+            self.accountError = "Your session has expired. Please sign in again."
+            return true
+        }
     }
     let media = DeviceMedia()
+    private var draftTransfers: [String: Task<Void, Error>] = [:]
     @Published var signedIn = false
     @Published var busy = false
     @Published var accountError = ""
     @Published var entryMode: EntryMode = .signIn
+    @Published var showingRegistrationSuccess = false
     @Published var entryNotice = ""
-    @Published private(set) var hasLegacyAccount = false
     @Published var companionTopic: Int?
     @Published var tab = "rooms"
     @Published var path: [NativeRoute] = []
@@ -94,24 +107,17 @@ final class MiNaAppModel: ObservableObject {
     func restore() async {
         guard !restored else { return }
         restored = true
-        // Pre-native releases exported temporary media links into this cache.
-        // The account library and its original recordings live in Application Support.
-        if let cache = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first {
-            let oldCache = cache.appendingPathComponent("MiNaPages", isDirectory: true)
-            if FileManager.default.fileExists(atPath: oldCache.path) { try? FileManager.default.removeItem(at: oldCache) }
-        }
         busy = true
         defer { busy = false }
         do {
             try finishDeletion()
-            hasLegacyAccount = try SessionStore.read(.legacy) != nil
             try SessionStore.write(nil, to: .password)
             UserDefaults.standard.removeObject(forKey: "mina.native.unlocked")
         } catch { accountError = error.localizedDescription }
     }
 
-    func submit(email input: String, password: String) async {
-        guard restored, !busy, !signedIn else { return }
+    func submit(email input: String, password: String, confirmation: String) async {
+        guard restored, !busy, !signedIn, !showingRegistrationSuccess else { return }
         accountError = ""
         entryNotice = ""
         let email = input.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -120,6 +126,10 @@ final class MiNaAppModel: ObservableObject {
             return
         }
         guard !password.isEmpty else { accountError = "Enter your password."; return }
+        if entryMode == .signUp && !password.utf8.elementsEqual(confirmation.utf8) {
+            accountError = "Passwords do not match."
+            return
+        }
         busy = true
         defer { busy = false }
         do {
@@ -127,6 +137,11 @@ final class MiNaAppModel: ObservableObject {
             switch entryMode {
             case .signIn:
                 try await api.signIn(email: email, password: password)
+            case .signUp:
+                try await api.signUp(email: email, password: password)
+                api.close()
+                showingRegistrationSuccess = true
+                return
             case .link:
                 let legacy = MiNaAPI(slot: .legacy)
                 guard try await legacy.linkLegacyAccount(email: email, password: password) else {
@@ -159,12 +174,71 @@ final class MiNaAppModel: ObservableObject {
         tab = "rooms"
         signedIn = true
         wallet.setOwner(api.userID)
+        let account = api.userID
+        Task {
+            for key in ["postDraft", "dreamDraft"] {
+                for field in ["media", "candidate"] {
+                    // The editor offers a retry for an interrupted capture.
+                    try? await uploadDraft(key, field: field, owner: account)
+                }
+            }
+        }
+    }
+
+    /// Commit the cloud reference before releasing the capture. Re-read the journal after
+    /// the upload so a changed caption, replaced draft or account switch is preserved.
+    func uploadDraft(_ key: String, field: String, owner: String) async throws {
+        guard api.userID == owner, signedIn else { throw MiNaIssue("Sign in to continue.") }
+        let journalKey = "community.drafts." + owner
+        guard let journal = state(journalKey) as? CommunityRow, let draft = journal[key] as? CommunityRow,
+              let item = draft[field] as? CommunityRow, item.communityString("path").isEmpty,
+              let id = item["id"] as? String else { return }
+        let transferID = [owner, key, field, id].joined(separator: ":")
+        if let pending = draftTransfers[transferID] { return try await pending.value }
+        let task = Task { try await commitCapture(id, owner: owner, key: key, field: field) }
+        draftTransfers[transferID] = task
+        defer { draftTransfers[transferID] = nil }
+        try await task.value
+    }
+
+    private func commitCapture(_ id: String, owner: String, key: String, field: String) async throws {
+        let journalKey = "community.drafts." + owner
+        guard owner == api.userID else { throw CancellationError() }
+        guard let file = try media.storedAsset(id) else { throw MiNaIssue("The unfinished capture is unavailable. Choose or record it again.") }
+        let data = try await Task.detached { try Data(contentsOf: file, options: .mappedIfSafe) }.value
+        guard !data.isEmpty, data.count <= 50 * 1024 * 1024 else { throw MiNaIssue("Choose a file of 50 MB or less.") }
+        guard owner == api.userID else { throw CancellationError() }
+        let ext = file.pathExtension.lowercased()
+        let path = try await api.upload(data, type: UTType(filenameExtension: ext)?.preferredMIMEType ?? "application/octet-stream",
+                                        extension: ext, id: id)
+        guard owner == api.userID, signedIn else { throw CancellationError() }
+        guard var latest = state(journalKey) as? CommunityRow, var current = latest[key] as? CommunityRow,
+              var ref = current[field] as? CommunityRow, ref["id"] as? String == id else {
+            try await discardUnusedCapture(path)
+            return
+        }
+        ref["path"] = path
+        current[field] = ref
+        latest[key] = current
+        try save(journalKey, latest)
+        try media.remove(id)
+    }
+
+    func discardUnusedCapture(_ path: String) async throws {
+        let owner = api.userID
+        guard !owner.isEmpty, path.hasPrefix(owner + "/") else { return }
+        let drafts = state("community.drafts." + owner) as? CommunityRow ?? [:]
+        for case let draft as CommunityRow in drafts.values {
+            for field in ["media", "candidate"] {
+                if (draft[field] as? CommunityRow)?["path"] as? String == path { return }
+            }
+        }
+        try await api.removeUnusedCapture(path, owner: owner)
     }
 
     private func removeLegacySession(for owner: UUID) throws {
         if try SessionStore.owner(SessionStore.read(.legacy)) == owner.uuidString {
             try SessionStore.write(nil, to: .legacy)
-            hasLegacyAccount = false
         }
     }
 
@@ -183,25 +257,30 @@ final class MiNaAppModel: ObservableObject {
             } else {
                 api.signOut()
             }
-            wallet.setOwner("")
-            api.close()
-            blockNotice = nil
-            safetyNotice = nil
-            signedIn = false
-            companionTopic = nil
-            entryMode = .signIn
-            entryNotice = ""
-            snapshot = [:]
-            AccountLibrary.owner = "Device"
-            tab = "rooms"
-            path = []
-            accountError = ""
+            closeSession()
         } catch { accountError = error.localizedDescription }
+    }
+
+    private func closeSession() {
+        wallet.setOwner("")
+        api.close()
+        blockNotice = nil
+        safetyNotice = nil
+        signedIn = false
+        companionTopic = nil
+        entryMode = .signIn
+        entryNotice = ""
+        snapshot = [:]
+        AccountLibrary.owner = "Device"
+        tab = "rooms"
+        path = []
+        accountError = ""
     }
 
     private func finishDeletion() throws {
         guard let value = UserDefaults.standard.string(forKey: deletionOwner), let owner = UUID(uuidString: value) else { return }
         AccountLibrary.owner = owner.uuidString
+        try DeviceWallet.erase(owner: owner.uuidString)
         try media.clear()
         try removeLegacySession(for: owner)
         try SessionStore.write(nil, to: .password)
@@ -224,8 +303,8 @@ private let artworkCache = NSCache<NSString, UIImage>()
 func nativeArtwork(_ group: String, _ name: String) -> Image {
     let key = "\(group)/\(name)" as NSString
     if let image = artworkCache.object(forKey: key) { return Image(uiImage: image).resizable() }
-    if let url = Bundle.main.url(forResource: name, withExtension: "webp", subdirectory: "Artwork/" + group),
-       let image = UIImage(contentsOfFile: url.path) {
+    if let data = CloudInterface.catalog?.images[key as String],
+       let image = UIImage(data: data) {
         artworkCache.setObject(image, forKey: key)
         return Image(uiImage: image).resizable()
     }
@@ -240,7 +319,7 @@ struct NativePortrait: View {
     var size: CGFloat = 62
     @State private var url: URL?
     var body: some View {
-        AsyncImage(url: url) { phase in
+        CloudPortraitImage(url: url) { phase in
             if let image = phase.image { image.resizable().scaledToFill() }
             else { NativeArt("edit", 4).scaledToFill() }
         }
@@ -309,6 +388,7 @@ struct MiNaRoot: View {
             }
             .navigationDestination(for: NativeRoute.self) { route in destination(route) }
         }
+        .id(app.signedIn)
         .accessibilityHidden(app.companionTopic != nil)
         .overlay { if app.signedIn, let topic = app.companionTopic { CompanionTopicOverlay(topic: topic) } }
         .overlay(alignment: .top) { if app.signedIn { IncomingCallBanner() } }
@@ -331,22 +411,40 @@ struct MiNaRoot: View {
         case "wallet": WalletScreen(store: app.wallet)
         case "level", "store": EconomyScreen(route: route)
         case "legal", "support", "delete", "logout": AccountScreen(route: route)
-        default: Text("This page is unavailable.")
+        default: Color.clear.minaAlert("This page is unavailable.")
         }
     }
 }
 
 private struct WelcomeScreen: View {
     @EnvironmentObject var app: MiNaAppModel
-    private enum Field { case email, password }
+    private enum Field { case email, password, confirmation }
     @FocusState private var focused: Field?
+    @State private var lastField: Field?
     @State private var email = ""
     @State private var password = ""
+    @State private var confirmation = ""
     @State private var consent = false
 
+    private var emailIsValid: Bool {
+        MiNaAPI.validEmail(email.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    private var passwordsMatch: Bool {
+        password.utf8.elementsEqual(confirmation.utf8)
+    }
+
+    private func validate(_ field: Field?) {
+        if field == .email && !email.isEmpty && !emailIsValid {
+            AppAlerts.shared.show("Enter a valid email address.")
+        } else if field == .confirmation && !confirmation.isEmpty && !passwordsMatch {
+            AppAlerts.shared.show("Passwords do not match.")
+        }
+    }
+
     private var canSubmit: Bool {
-        consent && !app.busy && !password.isEmpty &&
-            MiNaAPI.validEmail(email.trimmingCharacters(in: .whitespacesAndNewlines))
+        consent && !app.busy && emailIsValid && !password.isEmpty &&
+            (app.entryMode != .signUp || passwordsMatch)
     }
 
     private let mint = Color(red: 0.68, green: 1, blue: 0.87)
@@ -363,8 +461,6 @@ private struct WelcomeScreen: View {
                         .shadow(color: midnight.opacity(0.55), radius: 8, y: 3)
                         .accessibilityAddTraits(.isHeader)
                     VStack(spacing: 12) {
-                        if app.entryMode == .link { modeButton("Sign in", .signIn) }
-                        else if app.hasLegacyAccount { modeButton("Link account", .link) }
                         VStack(spacing: 0) {
                             credentialRow("Email", fieldID: .email) {
                                 TextField("", text: $email, prompt: fieldPrompt("you@example.com"))
@@ -374,13 +470,25 @@ private struct WelcomeScreen: View {
                                     .onSubmit { focused = .password }
                                     .accessibilityLabel("Email address")
                             }
-                            Rectangle().fill(.white.opacity(0.22)).frame(height: 1)
-                                .padding(.horizontal, 18).accessibilityHidden(true)
+                            credentialDivider
                             credentialRow("Password", fieldID: .password) {
                                 SecureField("", text: $password, prompt: fieldPrompt("Password"))
                                     .textContentType(app.entryMode == .signIn ? .password : .newPassword)
-                                    .focused($focused, equals: .password).submitLabel(.go)
-                                    .onSubmit { submit() }.accessibilityLabel("Password")
+                                    .focused($focused, equals: .password)
+                                    .submitLabel(app.entryMode == .signUp ? .next : .go)
+                                    .onSubmit {
+                                        if app.entryMode == .signUp { focused = .confirmation }
+                                        else { submit() }
+                                    }.accessibilityLabel("Password")
+                            }
+                            if app.entryMode == .signUp {
+                                credentialDivider
+                                credentialRow("Confirm password", fieldID: .confirmation) {
+                                    SecureField("", text: $confirmation, prompt: fieldPrompt("Confirm password"))
+                                        .textContentType(.newPassword)
+                                        .focused($focused, equals: .confirmation).submitLabel(.go)
+                                        .onSubmit { submit() }.accessibilityLabel("Confirm password")
+                                }
                             }
                         }
                         .background(midnight.opacity(0.64), in: RoundedRectangle(cornerRadius: 22))
@@ -390,10 +498,6 @@ private struct WelcomeScreen: View {
                                 .allowsHitTesting(false)
                         }
                         consentRow
-                        if !app.accountError.isEmpty {
-                            Text(app.accountError).font(.footnote.weight(.semibold))
-                                .foregroundStyle(Color(red: 1, green: 0.84, blue: 0.80))
-                        }
                         if !app.entryNotice.isEmpty { Text(app.entryNotice).font(.footnote) }
                         Button(action: submit) {
                             Group {
@@ -408,6 +512,11 @@ private struct WelcomeScreen: View {
                             )
                         }
                         .disabled(!canSubmit).opacity(canSubmit || app.busy ? 1 : 0.72)
+                        if app.entryMode == .signIn {
+                            modeButton("Create account", .signUp)
+                        } else {
+                            modeButton("Back to sign in", .signIn)
+                        }
                     }
                     .padding(.top, 22)
                     .disabled(app.busy)
@@ -434,6 +543,27 @@ private struct WelcomeScreen: View {
             }.ignoresSafeArea().accessibilityHidden(true)
         }
         .toolbar(.hidden, for: .navigationBar)
+        .minaAlert(app.accountError)
+        .onChange(of: focused) { next in
+            let previous = lastField
+            lastField = next
+            if previous != next { validate(previous) }
+        }
+        .alert("Account created", isPresented: $app.showingRegistrationSuccess) {
+            Button("OK") { app.entryMode = .signIn }
+        } message: {
+            Text("You can now sign in with your email and password.")
+        }
+        .onChange(of: app.entryMode) { _ in
+            focused = nil
+            password = ""
+            confirmation = ""
+        }
+    }
+
+    private var credentialDivider: some View {
+        Rectangle().fill(.white.opacity(0.22)).frame(height: 1)
+            .padding(.horizontal, 18).accessibilityHidden(true)
     }
 
     private func fieldPrompt(_ text: String) -> Text {
@@ -474,17 +604,18 @@ private struct WelcomeScreen: View {
 
     private func modeButton(_ title: String, _ mode: EntryMode) -> some View {
         Button(title) {
-            focused = nil
             app.entryMode = mode
-            password = ""
             app.accountError = ""
             app.entryNotice = ""
         }.font(.subheadline.weight(.semibold)).frame(minHeight: 44)
     }
 
     private func submit() {
-        guard canSubmit else { return }
+        guard canSubmit else {
+            validate(!emailIsValid ? .email : .confirmation)
+            return
+        }
         focused = nil
-        Task { await app.submit(email: email, password: password) }
+        Task { await app.submit(email: email, password: password, confirmation: confirmation) }
     }
 }

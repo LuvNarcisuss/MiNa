@@ -40,7 +40,7 @@ struct RoomLiveView: View {
                 RoomStageFrame(title: room.roomText("title"),topic: room.roomText("topic"),cover: room.roomText("cover"),host: session.name(hostID),hostStatus: seats[0] == nil ? "Host away" : "Host",audience: session.active ? session.members.count : nil,runtime: max(0,Int(-(roomDate(room.roomText("created_at")) ?? Date()).timeIntervalSinceNow / 60)),seats: seats,hostPortrait: session.pictures[hostID],portraits: portraits,safetyMenu: AnyView(safetyMenu),participants: session.participants,selectParticipant: showListener,open: { next,n in seat = n; listenerID = ""; panel = next }) {
                     stageChat
                 }
-            } else { VStack(spacing: 16) { Text(session.status); if session.status == "Reconnecting…" { Button("Retry") { session.leave(app.api,id); retry += 1 } }; Button("Back to rooms") { app.go("rooms") } } }
+            } else { VStack(spacing: 16) { if session.status != "This room has ended or is private." { Text(session.status) }; if session.status == "Reconnecting…" { Button("Retry") { session.leave(app.api,id); retry += 1 } }; Button("Back to rooms") { app.go("rooms") } } }
         }
         .navigationBarBackButtonHidden(session.room != nil)
         .task(id: "\(phase == .background)-\(interrupted)-\(retry)") {
@@ -53,6 +53,10 @@ struct RoomLiveView: View {
             } else { interrupted = false }
         }
         .onReceive(Timer.publish(every: 3,on: .main,in: .common).autoconnect()) { _ in session.watchdog() }
+        .minaAlert(player.error)
+        .minaAlert(session.problem)
+        .minaAlert(session.status == "Reconnecting…" ? "The room connection was interrupted. MiNa will retry." : "")
+        .minaAlert(session.status == "This room has ended or is private." ? session.status : "")
         .onDisappear { session.leave(app.api,id); player.stop() }
         .onAppear { if let stamp = app.state(resumeKey) as? Double, Date().timeIntervalSince1970 - stamp < 600 {
             panel = .gift; try? app.save(resumeKey,nil)
@@ -178,8 +182,8 @@ struct RoomLiveView: View {
         return sound.map { "Requested “" + $0.title + "”." } ?? text
     }
     func act(_ action: @escaping @MainActor () async throws -> Void) {
-        guard !busy else { return }; busy = true; session.notice = ""
-        Task { @MainActor in defer { busy = false }; do { try await action() } catch { session.notice = error.localizedDescription } }
+        guard !busy else { return }; busy = true; session.notice = ""; session.problem = ""
+        Task { @MainActor in defer { busy = false }; do { try await action() } catch { session.problem = error.localizedDescription } }
     }
     func send(_ text: String) async throws {
         guard session.active, session.room?.roomFlag("allow_comments") == true else { throw MiNaIssue("Room chat is unavailable.") }
@@ -193,7 +197,7 @@ struct RoomLiveView: View {
         switch next {
         case .host:
             HStack {
-                if let url = session.pictures[hostID] { AsyncImage(url: url) { image in image.resizable().scaledToFill() } placeholder: { Color.teal }.frame(width: 48,height: 48).clipShape(Circle()) }
+                if let url = session.pictures[hostID] { CloudPortraitImage(url: url) { image in image.resizable().scaledToFill() } placeholder: { Color.teal }.frame(width: 48,height: 48).clipShape(Circle()) }
                 else { RoomArtwork(session.room?.roomText("cover") ?? "moon-seat").scaledToFill().frame(width: 48,height: 48).clipShape(Circle()) }
                 VStack(alignment: .leading) { Text(session.name(hostID)).bold(); Text("Room host").font(.caption) }
             }
@@ -253,7 +257,6 @@ struct RoomLiveView: View {
                     } else { try await send("mina:music:" + sound.id); session.notice = "Requested " + sound.title + "." }
                 } }.disabled(busy || !session.active || (!session.host && session.room?.roomFlag("allow_comments") != true))
             }
-            if !player.error.isEmpty { Text(player.error) }
         case .chat:
             ForEach(session.messages, id: \.roomMessageID) { row in messageLine(row) }
             if session.messages.isEmpty { Text("No room messages yet.") }
@@ -276,7 +279,7 @@ struct RoomLiveView: View {
     }
     @ViewBuilder private func memberPortrait(_ uid: String, size: CGFloat = 44) -> some View {
         if let url = session.pictures[uid] {
-            AsyncImage(url: url) { image in image.resizable().scaledToFill() } placeholder: { Color.teal.opacity(0.15) }.frame(width: size,height: size).clipShape(Circle())
+            CloudPortraitImage(url: url) { image in image.resizable().scaledToFill() } placeholder: { Color.teal.opacity(0.15) }.frame(width: size,height: size).clipShape(Circle())
         } else { Text(String(session.name(uid).prefix(2))).bold().frame(width: size,height: size).background(Color.teal.opacity(0.15),in: Circle()) }
     }
     func updateMember(_ uid: String,_ body: RoomRow) async throws {
@@ -357,13 +360,12 @@ private struct RoomModerationForm: View {
                 Button(target.block ? "Confirm block" : "Submit report", role: target.block ? .destructive : nil) {
                     Task { await submit() }
                 }
-                if !error.isEmpty { Text(error) }
             }
             .navigationTitle(target.block ? "Block listener?" : "Report " + target.kind)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
             .disabled(busy)
-        }.interactiveDismissDisabled(busy).presentationDetents([.medium, .large])
+        }.minaAlert(error).interactiveDismissDisabled(busy).presentationDetents([.medium, .large])
     }
 
     @MainActor private func submit() async {

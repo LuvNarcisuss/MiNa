@@ -6,21 +6,15 @@ struct AccountScreen: View {
     @State private var message = ""
     @State private var notice = ""
     @State private var sending = false
-    private struct Policy: Decodable { let title: String; let sections: [[String]] }
-    private static let policies: [String: Policy] = {
-        guard let url = Bundle.main.url(forResource: "policies", withExtension: "json"),
-              let data = try? Data(contentsOf: url) else { return [:] }
-        return (try? JSONDecoder().decode([String: Policy].self, from: data)) ?? [:]
-    }()
-
     var body: some View {
         content
+            .minaAlert(app.accountError)
     }
 
     @ViewBuilder private var content: some View {
         if route.name.hasPrefix("legal.") {
             let key = String(route.name.dropFirst(6))
-            if let policy = Self.policies[key] {
+            if let policy = CloudInterface.catalog?.policies[key] {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
                         Text(key == "guidelines" ? "Effective November 20, 2026" : "Effective November 24, 2026").font(.caption)
@@ -33,7 +27,7 @@ struct AccountScreen: View {
                         }
                     }.padding()
                 }.background { AccountBackdrop(group: "privacy") }.navigationTitle(policy.title).navigationBarTitleDisplayMode(.inline)
-            } else { Text("This document is unavailable.") }
+            } else { Color.clear.minaAlert("This document is unavailable.") }
         } else if route.name == "support" {
             Form {
                 Section("How can we help?") {
@@ -56,7 +50,6 @@ struct AccountScreen: View {
                             .frame(maxWidth: .infinity,minHeight: 46).background(LinearGradient(colors:[.mint,.cyan],startPoint:.leading,endPoint:.trailing),in: Capsule())
                     }
                     Button("Cancel") { app.back() }
-                    if !app.accountError.isEmpty { Text(app.accountError).font(.footnote) }
                 }.padding(24).disabled(app.busy).background { NativeArt("spend",1) }
                     .clipShape(RoundedRectangle(cornerRadius: 20))
             }.frame(maxWidth: .infinity).background { AccountBackdrop(group: "privacy") }
@@ -72,6 +65,6 @@ struct AccountScreen: View {
             try await app.api.rest("support_requests", method: "POST", body: ["body": message.trimmingCharacters(in: .whitespacesAndNewlines)])
             message = ""
             notice = "Your request has been received."
-        } catch { notice = error.localizedDescription }
+        } catch { AppAlerts.shared.show(error.localizedDescription) }
     }
 }

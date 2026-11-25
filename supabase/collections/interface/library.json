@@ -1,0 +1,38 @@
+{
+  "stories": [
+    {
+      "id": "journal-moon-window",
+      "title": "A window left open",
+      "summary": "For a moment, the whole street was quiet enough to hear the curtains move.",
+      "body": "Across the courtyard, one window stayed lit. A spoon touched the side of a cup, then the light went out. The curtains lifted again. For once, there was nothing else I needed to do.",
+      "cover": "moon-seat"
+    },
+    {
+      "id": "journal-falling-star",
+      "title": "One last star",
+      "summary": "I watched a small light cross the sky and forgot to make a wish.",
+      "body": "Maybe it was a plane. Maybe someone in a window seat was watching the lights below, trying to guess which one was home. I pulled the blanket to my chin and let the thought drift on.",
+      "cover": "star-pillow"
+    }
+  ],
+  "sounds": [
+    {
+      "id": "moon-seat",
+      "title": "A Moon to Lean On",
+      "detail": "Slow, warm harmonies",
+      "topic": "Light music"
+    },
+    {
+      "id": "star-pillow",
+      "title": "Starlight Lullaby",
+      "detail": "Soft bells under the stars",
+      "topic": "Light music"
+    },
+    {
+      "id": "moonlit-sea",
+      "title": "The Midnight Tide",
+      "detail": "Gentle waves on a quiet shore",
+      "topic": "Nature sounds"
+    }
+  ]
+}

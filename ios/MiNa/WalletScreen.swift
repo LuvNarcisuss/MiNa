@@ -5,12 +5,7 @@ struct WalletScreen: View {
     @EnvironmentObject private var app: MiNaAppModel
     @Environment(\.scenePhase) private var scenePhase
     @ObservedObject var store: WalletStore
-    @State private var balance: Int?
-    @State private var balanceError = false
-    @State private var read = UUID()
-    @State private var historyRefresh = 0
     @State private var showHistory = false
-    @State private var checkout: Task<Void, Never>?
     @ScaledMetric private var bodySize: CGFloat = 16
     private let aqua = Color(red: 0.02, green: 0.9, blue: 0.68)
     private let blue = Color(red: 0.42, green: 0.73, blue: 1)
@@ -31,22 +26,21 @@ struct WalletScreen: View {
                             NativeArt("wallet", 4).scaledToFit().frame(width: 84, height: 17)
                                 .accessibilityLabel("My wallet")
                             Group {
-                                if let balance { Text(balance.formatted()).font(.largeTitle.bold().monospacedDigit()) }
-                                else if balanceError { Text("Unavailable").font(.headline) }
+                                if let balance = store.ledger?.balance { Text(balance.formatted()).font(.largeTitle.bold().monospacedDigit()) }
+                                else if !store.problem.isEmpty { Text("—").font(.headline) }
                                 else { ProgressView() }
                             }.accessibilityIdentifier("wallet.balance")
-                            Text("Star coin balance").font(.caption)
+                            Text("Star coins on this iPhone").font(.caption)
 
                         }
                         Spacer()
                         NativeArt("wallet", 3).scaledToFit().frame(width: 124, height: 132).accessibilityHidden(true)
                     }
-                    if !SKPaymentQueue.canMakePayments() { Text("Purchases are disabled on this iPhone.").font(.footnote) }
                     if !store.catalogMessage.isEmpty { Text(store.catalogMessage).font(.footnote) }
                     if !store.message.isEmpty { Text(store.message).font(.callout).accessibilityIdentifier("wallet.status") }
                     ForEach(CoinPackage.all) { pack in
                         let price = store.price(pack)
-                        Button { checkout = Task { await store.buy(pack) } } label: {
+                        Button { store.buy(pack) } label: {
                             HStack(spacing: 9) {
                                 NativeArt("wallet", 6).scaledToFit().frame(width: 34, height: 36).accessibilityHidden(true)
                                 ViewThatFits(in: .horizontal) {
@@ -72,7 +66,7 @@ struct WalletScreen: View {
                             .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(blue.opacity(0.7), lineWidth: 0.8) }
                             .contentShape(Rectangle())
                         }
-                        .disabled(price == nil || store.busy || !SKPaymentQueue.canMakePayments())
+                        .disabled(store.ledger == nil || price == nil || store.busy || !SKPaymentQueue.canMakePayments())
                         .accessibilityLabel("\(pack.coins) star coins, \(price ?? "unavailable")")
                         .accessibilityIdentifier("wallet.package.\(pack.coins)")
                     }
@@ -81,25 +75,19 @@ struct WalletScreen: View {
                         Spacer()
                         Button("View all") { showHistory = true }.font(.subheadline)
                     }.padding(.top, 8)
-                    WalletActivity(store: store, purchasesOnly: true, refreshVersion: historyRefresh)
+                    WalletActivity(store: store, purchasesOnly: true)
                 }.padding(.horizontal, 20).padding(.vertical, 18)
-            }.refreshable {
-                historyRefresh += 1
-                await refresh()
-            }
+            }.refreshable { refresh() }
         }
         .foregroundStyle(.primary)
         .buttonStyle(.plain)
         .background { NativeArt("wallet", 1).ignoresSafeArea().accessibilityHidden(true) }
         .toolbar(.hidden, for: .navigationBar)
-        .task { await refresh() }
-        .onChange(of: store.revision) { _ in
-            read = UUID()
-            balance = store.confirmedBalance
-            Task { await loadBalance() }
-        }
+        .minaAlert(store.problem)
+        .minaAlert(store.catalogProblem)
+        .minaAlert(SKPaymentQueue.canMakePayments() ? "" : "Purchases are disabled on this iPhone.")
+        .task { refresh() }
         .onChange(of: scenePhase) { phase in if phase == .active { store.recover() } }
-        .onDisappear { checkout?.cancel() }
         .alert(item: Binding(get: { store.notices.first }, set: { if $0 == nil { store.dismissNotice() } })) { notice in
             Alert(title: Text("Purchase successful"),
                   message: Text("\(notice.coins.formatted()) star coins added."),
@@ -108,51 +96,54 @@ struct WalletScreen: View {
         .sheet(isPresented: $showHistory) { WalletActivity(store: store) }
     }
 
-    private func refresh() async {
+    private func refresh() {
+        store.reloadLedger()
         store.loadCatalog()
         store.recover()
-        await loadBalance()
-    }
-
-    private func loadBalance() async {
-        let ticket = UUID()
-        read = ticket
-        let owner = app.api.userID
-        do {
-            let ledger = await store.activeLedger()
-            guard ticket == read, owner == app.api.userID, !Task.isCancelled else { return }
-            #if DEBUG && targetEnvironment(simulator)
-            if ledger == .local {
-                balance = store.testCredits.reduce(0) { $0 + $1.coins }
-                balanceError = false
-                return
-            }
-            #endif
-            let table = ledger == .sandbox ? "sandbox_wallets" : "wallets"
-            let row = try await app.api.rows(table + "?select=balance&owner_id=eq." + owner).first
-            guard ticket == read, owner == app.api.userID, !Task.isCancelled else { return }
-            balance = row?["balance"] as? Int ?? (ledger == .sandbox && row == nil ? 0 : nil)
-            balanceError = balance == nil
-        } catch {
-            if ticket == read && !Task.isCancelled { balanceError = true; balance = nil }
-        }
     }
 }
 
 private struct WalletActivity: View {
     @EnvironmentObject private var app: MiNaAppModel
+    @State private var earlierSpending: [GiftSpending.Activity] = []
+    @State private var activityError = ""
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var store: WalletStore
     var purchasesOnly = false
-    var refreshVersion = 0
-    @State private var items: [Entry] = []
-    @State private var message = "Loading activity…"
+    private var items: [Entry] {
+        guard let wallet = store.ledger else { return [] }
+        var rows = wallet.credits.map { Entry(id: "purchase-" + $0.id, kind: "Star coin purchase", amount: $0.coins, date: $0.date) }
+        if !purchasesOnly {
+            rows += wallet.spending.map {
+                Entry(id: $0.id, kind: $0.pending ? "Gift pending" : ($0.isStore ? "Backpack item" : "Gift sent"),
+                      amount: -($0.coins + ($0.cloudCoins ?? 0)), date: $0.date)
+            }
+        }
+        if !purchasesOnly, store.environment == .production {
+            let localIDs = Set(wallet.spending.map(\.id))
+            rows += earlierSpending.filter { !localIDs.contains($0.id) }
+        }
+        return Array(rows.sorted { $0.date > $1.date }.prefix(50))
+    }
 
-    private struct Entry: Identifiable {
-        let id: String
-        let kind: String
-        let amount: Int
-        let date: Date
+    private var message: String {
+        guard store.ledger != nil else { return "" }
+        return items.isEmpty ? (purchasesOnly ? "No purchases yet." : "No wallet activity yet.") : ""
+    }
+
+    private typealias Entry = GiftSpending.Activity
+
+    private func loadEarlierSpending() async {
+        let owner = store.owner
+        guard !purchasesOnly, store.environment == .production, !owner.isEmpty else { return }
+        do {
+            let result = try await app.gifts.recentActivity(owner: owner)
+            guard !Task.isCancelled, owner == store.owner else { return }
+            earlierSpending = result
+            activityError = ""
+        } catch {
+            if !Task.isCancelled, owner == store.owner { activityError = "Earlier gift activity could not be loaded. Pull to retry." }
+        }
     }
 
     var body: some View {
@@ -169,16 +160,20 @@ private struct WalletActivity: View {
             } else {
                 NavigationStack {
                     List {
-                        if !message.isEmpty { Text(message) }
+                        if !message.isEmpty && activityError.isEmpty { Text(message) }
                         ForEach(items) { item in entryRow(item) }
                     }
                     .navigationTitle("Recent activity").navigationBarTitleDisplayMode(.inline)
                     .toolbar { Button("Done") { dismiss() } }
-                    .refreshable { await load() }
+                    .refreshable { store.reloadLedger(); await loadEarlierSpending() }
+                    .task(id: store.owner + store.environment.rawValue) {
+                        earlierSpending = []
+                        activityError = ""
+                        await loadEarlierSpending()
+                    }
                 }
             }
-        }
-        .task(id: [store.revision, refreshVersion]) { await load() }
+        }.minaAlert(activityError).minaAlert(store.problem)
     }
 
     private func entryRow(_ item: Entry) -> some View {
@@ -193,38 +188,4 @@ private struct WalletActivity: View {
         }.accessibilityElement(children: .combine)
     }
 
-    private func load() async {
-        do {
-            let owner = app.api.userID
-            let filter = "&owner_id=eq." + owner + "&order=created_at.desc&limit=50"
-            let ledger = await store.activeLedger()
-            #if DEBUG && targetEnvironment(simulator)
-            if ledger == .local {
-                guard owner == app.api.userID, !Task.isCancelled else { return }
-                items = store.testCredits.sorted { $0.date > $1.date }.prefix(50).map {
-                    Entry(id: $0.transaction, kind: "Star coin purchase", amount: $0.coins, date: $0.date)
-                }
-                message = items.isEmpty ? (purchasesOnly ? "No purchases yet." : "No wallet activity yet.") : ""
-                return
-            }
-            #endif
-            let environment = ledger == .sandbox ? "Sandbox" : "Production"
-            let purchases = try await app.api.rows("coin_purchases?select=transaction_id,coins,created_at&environment=eq." + environment + filter)
-            let spending = !purchasesOnly && ledger == .production ? try await app.api.rows("wallet_ledger?select=id,kind,amount,created_at" + filter) : []
-            let parser = ISO8601DateFormatter()
-            parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            let seconds = ISO8601DateFormatter()
-            let entries: [Entry] = (purchases + spending).compactMap { row in
-                guard let stamp = row["created_at"] as? String, let date = parser.date(from: stamp) ?? seconds.date(from: stamp) else { return nil }
-                if let id = row["transaction_id"] as? String, let coins = row["coins"] as? Int {
-                    return Entry(id: "purchase-" + id, kind: "Star coin purchase", amount: coins, date: date)
-                }
-                guard let id = row["id"] as? String, let amount = row["amount"] as? Int else { return nil }
-                return Entry(id: id, kind: row["kind"] as? String == "send" ? "Gift sent" : "Backpack item", amount: -amount, date: date)
-            }
-            guard owner == app.api.userID, !Task.isCancelled else { return }
-            items = Array(entries.sorted { $0.date > $1.date }.prefix(50))
-            message = items.isEmpty ? (purchasesOnly ? "No purchases yet." : "No wallet activity yet.") : ""
-        } catch { if !Task.isCancelled { message = "Activity could not be loaded. Pull to refresh." } }
-    }
 }

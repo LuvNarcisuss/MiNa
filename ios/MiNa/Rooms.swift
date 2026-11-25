@@ -8,16 +8,12 @@ extension Dictionary where Key == String, Value == Any {
     func roomFlag(_ key: String) -> Bool { self[key] as? Bool ?? false }
 }
 
-struct RoomSound: Identifiable {
+struct RoomSound: Identifiable, Decodable {
     let id: String
     let title: String
     let detail: String
     let topic: String
-    static let all = [
-        RoomSound(id: "moon-seat", title: "A Moon to Lean On", detail: "Slow, warm harmonies", topic: "Light music"),
-        RoomSound(id: "star-pillow", title: "Starlight Lullaby", detail: "Soft bells under the stars", topic: "Light music"),
-        RoomSound(id: "moonlit-sea", title: "The Midnight Tide", detail: "Gentle waves on a quiet shore", topic: "Nature sounds")
-    ]
+    static var all: [RoomSound] { CloudInterface.library?.sounds ?? [] }
     static func find(_ id: String) -> Self? { all.first { $0.id == id } }
 }
 
@@ -33,22 +29,34 @@ struct RoomArtwork: View {
     @Published var playing = ""
     @Published var error = ""
     private var audio: AVAudioPlayer?
-    func stop() { audio?.stop(); audio = nil; playing = "" }
+    private var download: Task<Void, Never>?
+    func stop() {
+        download?.cancel()
+        download = nil
+        audio?.stop()
+        audio = nil
+        playing = ""
+    }
     func play(_ sound: RoomSound, from start: Date? = nil) {
         stop()
-        do {
-            guard let url = Bundle.main.url(forResource: sound.id, withExtension: "wav", subdirectory: "Artwork/rooms-extra") else {
-                throw MiNaIssue("This soundscape is unavailable.")
-            }
-            let player = try AVAudioPlayer(contentsOf: url)
-            player.numberOfLoops = -1
-            player.volume = 0.72
-            if let start, player.duration > 0 { player.currentTime = max(0, -start.timeIntervalSinceNow).truncatingRemainder(dividingBy: player.duration) }
-            guard player.play() else { throw MiNaIssue("Playback could not start.") }
-            audio = player
-            playing = sound.id
-            error = ""
-        } catch { self.error = error.localizedDescription }
+        error = ""
+        download = Task {
+            do {
+                guard let soundFile = CloudInterface.catalog?.sounds[sound.id] else {
+                    throw MiNaIssue("This soundscape is unavailable.")
+                }
+                let data = try await CloudInterface.asset(sound.id + ".wav", digest: soundFile.sha256)
+                try Task.checkCancellation()
+                let player = try AVAudioPlayer(data: data)
+                player.numberOfLoops = -1
+                player.volume = 0.72
+                if let start, player.duration > 0 { player.currentTime = max(0, -start.timeIntervalSinceNow).truncatingRemainder(dividingBy: player.duration) }
+                guard player.play() else { throw MiNaIssue("Playback could not start.") }
+                audio = player
+                playing = sound.id
+                error = ""
+            } catch { if !Task.isCancelled { self.error = error.localizedDescription } }
+        }
     }
 }
 
@@ -70,7 +78,7 @@ struct RoomsScreen: View {
             switch route.name {
             case "rooms.live":
                 if let id = route.id, UUID(uuidString: id) != nil { RoomLiveView(id: id).id(id) }
-                else { Text("This room is unavailable.") }
+                else { Color.clear.minaAlert("This room is unavailable.") }
             case "rooms.stage": RoomLocalStage(id: route.id ?? "")
             case "rooms.create": RoomEditorView(id: route.id)
             case "rooms.ranks": RoomRankings(room: nil)
@@ -164,6 +172,7 @@ private struct RoomDiscovery: View {
         .navigationTitle(home ? "" : search ? "Search rooms" : ["rooms.hot":"Hot Rooms", "rooms.recommended":"Recommended", "rooms.sounds":"Soundscapes"][route] ?? "Live rooms")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(home || search ? .hidden : .visible, for: .navigationBar)
+        .minaAlert(status == "Live rooms could not load." ? status : "")
         .task(id: "\(route)-\(followed)-\(retry)") {
             guard route != "rooms.sounds" else { return }
             rooms = []; status = "Finding rooms…"
@@ -256,8 +265,11 @@ private struct RoomDiscovery: View {
 
     private var statusMessage: some View {
         HStack {
-            Text(status.isEmpty ? (search && !query.isEmpty ? "No matching live rooms." : "No open rooms right now.") : status)
-            if status == "Live rooms could not load." { Button("Retry") { retry += 1 } }
+            if status == "Live rooms could not load." {
+                Button("Retry") { retry += 1 }
+            } else {
+                Text(status.isEmpty ? (search && !query.isEmpty ? "No matching live rooms." : "No open rooms right now.") : status)
+            }
         }.font(.subheadline).foregroundStyle(.secondary).padding(.vertical, 8)
     }
 
@@ -294,7 +306,7 @@ private struct RoomDiscovery: View {
                 if found.isEmpty { statusMessage }
             }
             if route != "rooms.liveList" {
-                Text(followed ? "Saved sounds" : "Listen offline").font(.title3.bold())
+                Text(followed ? "Saved sounds" : "Soundscapes").font(.title3.bold())
                 let saved = app.state("room.savedSounds") as? [String] ?? []
                 let sounds = RoomSound.all.filter { (!followed || saved.contains($0.id)) && matches([$0.title,$0.detail,RoomSound.find($0.id)?.topic ?? ""].joined(separator: " ")) }
                 recommendations(sounds.map(DiscoveryEntry.init(sound:)))
@@ -334,17 +346,11 @@ private struct DiscoveryEntry: Identifiable {
         title = sound.title
         cover = sound.id
         detail = sound.detail
-        visibility = "Offline soundscape"
+        visibility = "Soundscape"
         live = false
         listeners = nil
         started = nil
-        loop = Self.durations[sound.id]
-    }
-
-    private static let durations = RoomSound.all.reduce(into: [String: TimeInterval]()) { result, sound in
-        guard let url = Bundle.main.url(forResource: sound.id, withExtension: "wav", subdirectory: "Artwork/rooms-extra"),
-              let file = try? AVAudioFile(forReading: url), file.fileFormat.sampleRate > 0 else { return }
-        result[sound.id] = Double(file.length) / file.fileFormat.sampleRate
+        loop = CloudInterface.catalog?.sounds[sound.id]?.seconds
     }
 
     func time(at date: Date) -> String? {
@@ -386,7 +392,7 @@ private struct DiscoveryCard: View {
                     Text(entry.title).font(.system(size: 14, weight: .medium)).lineLimit(1)
                     HStack(spacing: 3) {
                         NativeArt("home", entry.live ? 10 : 12).scaledToFit().frame(width: 13, height: 13)
-                        Text(entry.listeners.map(String.init) ?? (entry.live ? "Live" : "Offline"))
+                        Text(entry.listeners.map(String.init) ?? (entry.live ? "Live" : "Soundscape"))
                         Spacer(minLength: 2)
                         timeLabel.foregroundStyle(Color(red: 0.64, green: 1, blue: 0.63))
                     }.font(.system(size: 11, weight: .medium))
@@ -410,7 +416,7 @@ private struct DiscoveryCard: View {
                 .overlay(alignment: .bottom) {
                     HStack(spacing: 3) {
                         NativeArt("home", entry.live ? 11 : 12).frame(width: 13, height: 13)
-                        Text(entry.listeners.map(String.init) ?? (entry.live ? "Live" : "Offline"))
+                        Text(entry.listeners.map(String.init) ?? (entry.live ? "Live" : "Soundscape"))
                     }.font(.system(size: 10, weight: .medium)).foregroundStyle(.white)
                         .frame(maxWidth: .infinity).padding(.vertical, 3).background(.black.opacity(0.45))
                 }.clipShape(RoundedRectangle(cornerRadius: 9))
@@ -507,9 +513,9 @@ private struct RoomEditorView: View {
                 Button(busy ? "Opening…" : "Open room") { save(live: true) }.buttonStyle(RoomCapsuleStyle()).padding(.horizontal,27).padding(.top,8)
                 Button("Save private draft") { save(live: false) }.frame(minHeight: 44)
                 Text("Your microphone starts off.").font(.caption)
-                if !error.isEmpty { Text(error).font(.callout) }
             }.padding(.horizontal,19).padding(.bottom,18)
         }.background { NativeArt("createRoom",1).ignoresSafeArea().accessibilityHidden(true) }
+        .minaAlert(error)
         .tint(.mint).foregroundColor(.white).buttonStyle(.plain).disabled(busy).toolbar(.hidden,for: .navigationBar).onAppear {
             if let id, let d = drafts.first(where: { $0.roomText("id") == id }) {
                 title = d.roomText("title"); cover = d.roomText("cover"); topic = d.roomText("topic"); visibility = d.roomText("visibility")

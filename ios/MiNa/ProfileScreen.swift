@@ -10,11 +10,11 @@ struct ProfileScreen: View {
     @State private var isFriend = false
     @State private var edges: [ProfileRecord] = []
     @State private var people: [ProfileRecord] = []
-    @State private var balance: Int?
     @State private var savedFields: [String:String] = [:]
     @State private var savedBirthday = ""
     @State private var editingOwner = ""
     @State private var avatarID: String?
+    @State private var avatarData: Data?
     @State private var avatarImage: UIImage?
     @State private var uploadedAvatar: String?
     @State private var loadID = UUID()
@@ -72,10 +72,10 @@ struct ProfileScreen: View {
         }
         .frame(maxWidth: .infinity,maxHeight: .infinity)
         .background { AccountBackdrop(group: route.name == "profile" ? "profile" : route.name == "person" ? "publicProfile" : "edit") }
+        .minaAlert(notice)
         .safeAreaInset(edge: .bottom) {
-            if !notice.isEmpty {
-                HStack { Text(notice).font(.footnote); Spacer(); if route.name != "profile.edit" || editingOwner.isEmpty { Button("Reload") { Task { await load() } } } }
-                    .padding(10).background(.regularMaterial)
+            if !notice.isEmpty && (route.name != "profile.edit" || editingOwner.isEmpty) {
+                Button("Reload") { Task { await load() } }.padding(10)
             }
         }
         .task(id: "\(route)-\(app.safetyRevision)-\(route.name != "person" || phase == .active)") {
@@ -97,7 +97,6 @@ struct ProfileScreen: View {
                 }
                 Button("Submit report") { Task { await submitReport() } }
                 Button("Cancel") { reportOpen = false }
-                if !notice.isEmpty { Text(notice) }
             }.disabled(busy).presentationDetents([.medium])
         }
         .confirmationDialog(safety ?? "", isPresented: Binding(get: { safety != nil }, set: { if !$0 { safety = nil } }), titleVisibility: .visible) {
@@ -167,7 +166,7 @@ struct ProfileScreen: View {
                 HStack { workLink("My posts","feed.mine",5); workLink("My dreams","dreams.mine",6) }
                 Button { app.go("wallet") } label: {
                     NativeArt("profile",7).scaledToFit().overlay(alignment: .leading) {
-                        if let balance { Text(balance.formatted()).font(.footnote.bold()).padding(.leading,70).padding(.top,22) }
+                        ProfileWalletBalance(wallet: app.wallet)
                     }.overlay(alignment: .trailing) { NativeArt("profile",8).scaledToFit().frame(width: 84).padding(.trailing,8) }
                 }.accessibilityLabel("My wallet")
                 Text("More settings").font(.headline).frame(maxWidth: .infinity,alignment: .leading)
@@ -216,7 +215,7 @@ struct ProfileScreen: View {
                                 ZStack {
                                     Color(red: 0.22, green: 0.38, blue: 0.40)
                                     if let path = profile["avatar_path"] as? String, !path.isEmpty {
-                                        PublicCoverPhoto(path: path)
+                                        PublicCoverPhoto(path: path, notice: $notice).id(loadID)
                                     }
                                     LinearGradient(stops: [
                                         .init(color: .clear, location: 0.42),
@@ -338,7 +337,7 @@ struct ProfileScreen: View {
             }
             if let path = entry["media_path"] as? String {
                 CommunityMedia(path: path, duration: entry.communitySeconds("duration"), voice: showDreams,
-                               remote: true, openPost: showDreams ? nil : { app.go("feed.post", id) })
+                               openPost: showDreams ? nil : { app.go("feed.post", id) })
             }
         } else if entriesLoaded {
             Text(showDreams ? "No dreams yet." : "No posts yet.").font(.subheadline)
@@ -417,7 +416,7 @@ struct ProfileScreen: View {
                         if let avatarImage {
                             Image(uiImage: avatarImage).resizable().scaledToFill().frame(width: 116,height: 116).clipped()
                         } else if let path = profile["avatar_path"] as? String, !path.isEmpty {
-                            PublicCoverPhoto(path: path).frame(width: 124,height: 124).clipped()
+                            PublicCoverPhoto(path: path, notice: $notice).frame(width: 124,height: 124).clipped()
                         } else { NativeArt("edit",4).scaledToFit().frame(width: 124,height: 124) }
                         NativeArt("edit",6).scaledToFit().frame(width:64).padding(5)
                     }.frame(width:124,height:124).clipShape(RoundedRectangle(cornerRadius: 12))
@@ -540,7 +539,6 @@ struct ProfileScreen: View {
             if route.name == "person", owner != me {
                 videoCount = try await app.api.rest("entry_feed?select=id&owner_id=eq." + owner + "&kind=eq.post&limit=1", method: "HEAD", prefer: "count=exact") as? Int
             }
-            if route.name == "profile" { balance = try await app.api.rows("wallets?select=balance&owner_id=eq." + me).first?["balance"] as? Int }
             if route.name == "profile" { app.didRefreshRoot("profile") }
             if route.name == "profile.reports" {
                 reports = try await app.api.rows("reports?select=id,target_kind,target_label,reason,withdrawn_at&reporter_id=eq." + me + "&order=created_at.desc")
@@ -600,7 +598,7 @@ struct ProfileScreen: View {
     }
 
     private func discardAvatar() {
-        if let avatarID, editingOwner == me { try? app.media.remove(avatarID) }
+        avatarData = nil
         avatarID = nil; avatarImage = nil; uploadedAvatar = nil
     }
 
@@ -609,12 +607,13 @@ struct ProfileScreen: View {
             let chosen = try await app.pick("image")
             guard let id = chosen["id"] as? String else { return }
             guard me == editingOwner, let raw = chosen["url"] as? String, let url = URL(string: raw),
-                  let image = UIImage(contentsOfFile: url.path) else {
+                  let data = try? Data(contentsOf: url), let image = UIImage(data: data) else {
                 if me == editingOwner { try? app.media.remove(id) }
                 throw MiNaIssue("The selected image could not be opened.")
             }
             discardAvatar()
-            avatarID = id; avatarImage = image
+            try app.media.remove(id)
+            avatarID = id; avatarImage = image; avatarData = data
         }
     }
 
@@ -647,9 +646,7 @@ struct ProfileScreen: View {
             }
             guard me == editingOwner, !editingOwner.isEmpty else { throw MiNaIssue("Reopen your profile to continue.") }
             if let avatarID, uploadedAvatar == nil {
-                guard let raw = try app.media.resolve(avatarID)["url"] as? String, let url = URL(string: raw) else { throw MiNaIssue("Choose your profile photo again.") }
-                let data = try await Task.detached { try Data(contentsOf: url) }.value
-                guard me == editingOwner else { throw MiNaIssue("Reopen your profile to continue.") }
+                guard let data = avatarData else { throw MiNaIssue("Choose your profile photo again.") }
                 uploadedAvatar = try await app.api.upload(data, type: "image/jpeg", extension: "jpg", id: avatarID)
             }
             if let uploadedAvatar { profile["avatar_path"] = uploadedAvatar }
@@ -686,10 +683,39 @@ struct AccountBackdrop: View {
 private struct PublicCoverPhoto: View {
     @EnvironmentObject var app: MiNaAppModel
     let path: String
+    @Binding var notice: String
     @State private var url: URL?
     var body: some View {
-        AsyncImage(url: url) { phase in
-            if let image = phase.image { image.resizable().scaledToFill() }
-        }.task(id: path) { url = try? await app.api.mediaURL(path) }
+        CloudPortraitImage(url: url) { phase in
+            switch phase {
+            case .success(let image):
+                image.resizable().scaledToFill()
+            case .failure:
+                Color.clear.onAppear { notice = "The profile photo couldn’t be loaded. Please try again." }
+            default:
+                Color.clear
+            }
+        }
+        .task(id: path) {
+            url = nil
+            do {
+                let signedURL = try await app.api.mediaURL(path)
+                try Task.checkCancellation()
+                url = signedURL
+            } catch {
+                guard !Task.isCancelled, !(error is CancellationError) else { return }
+                notice = "The profile photo couldn’t be loaded. Please try again."
+            }
+        }
+    }
+}
+
+private struct ProfileWalletBalance: View {
+    @ObservedObject var wallet: WalletStore
+
+    var body: some View {
+        if let balance = wallet.ledger?.balance {
+            Text(balance.formatted()).font(.footnote.bold()).padding(.leading, 70).padding(.top, 22)
+        }
     }
 }

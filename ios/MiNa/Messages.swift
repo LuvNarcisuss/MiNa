@@ -47,7 +47,7 @@ struct InboxAvatar: View {
         ZStack {
             Circle().fill(Color.mint.opacity(0.22))
             Text(String((person?.string("name") ?? "☾").prefix(1))).font(.title3)
-            if let url { AsyncImage(url: url) { image in image.resizable().scaledToFill() } placeholder: { Color.clear } }
+            if let url { CloudPortraitImage(url: url) { image in image.resizable().scaledToFill() } placeholder: { Color.clear } }
         }
         .frame(width: size, height: size).clipShape(Circle())
         .task(id: person?.string("avatar_path")) {
@@ -142,7 +142,7 @@ private struct MessageListScreen: View {
                 }
             }.padding(.horizontal, inbox ? 18 : 6).frame(minHeight: 44)
             if !error.isEmpty {
-                HStack { Text(error).font(.footnote); Spacer(); Button("Retry") { Task { await refresh() } } }
+                Button("Retry") { error = ""; Task { await refresh() } }
                     .padding(10).background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12)).padding(.horizontal)
             }
             if inbox {
@@ -174,6 +174,7 @@ private struct MessageListScreen: View {
         .buttonStyle(.plain)
         .toolbar(.hidden, for: .navigationBar)
         .background { NativeArt(inbox ? "inbox" : thread ? "chat" : category ? "noticeDetail" : "notice",1).ignoresSafeArea().accessibilityHidden(true) }
+        .minaAlert(error)
         .task {
             if thread, let saved = app.state(draftKey) as? [String:String] {
                 draft = saved["body"] ?? ""
@@ -262,13 +263,8 @@ private struct MessageListScreen: View {
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("conversation-" + row.id)
-            .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                Button(pinned ? "Unpin" : "Pin") {
-                    do {
-                        let remaining = pinnedPeers.filter { $0 != row.id }
-                        try app.save("chat.pinnedPeers", pinned ? remaining : [row.id] + remaining)
-                    } catch { self.error = error.localizedDescription }
-                }.tint(Color(red: 0.04, green: 0.42, blue: 0.41))
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                Button("Delete") { clear = row }.tint(.red)
                 Button(unread ? "Mark read" : "Mark unread") {
                     if unread { operate { try await mark(row.id, row.string("latest_id")) } }
                     else {
@@ -276,7 +272,12 @@ private struct MessageListScreen: View {
                         catch { self.error = error.localizedDescription }
                     }
                 }.tint(.blue)
-                Button("Delete") { clear = row }.tint(.red)
+                Button(pinned ? "Unpin" : "Pin") {
+                    do {
+                        let remaining = pinnedPeers.filter { $0 != row.id }
+                        try app.save("chat.pinnedPeers", pinned ? remaining : [row.id] + remaining)
+                    } catch { self.error = error.localizedDescription }
+                }.tint(Color(red: 0.04, green: 0.42, blue: 0.41))
             }
             .buttonStyle(.automatic)
         }

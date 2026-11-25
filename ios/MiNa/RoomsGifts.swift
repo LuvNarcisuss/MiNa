@@ -27,8 +27,8 @@ struct RoomInvitations: View {
                 }.disabled(busy || sent.contains(uid)) }
             }
             if friends.isEmpty && error.isEmpty { RoomEmptyPanel(title: loaded ? "No friends to invite" : "Finding friends…",detail: "Friends are people who follow each other.") }
-            if !error.isEmpty { Text(error); Button("Retry") { retry += 1 } }
-        }.task(id: retry) {
+            if !error.isEmpty { Button("Retry") { error = ""; retry += 1 } }
+        }.minaAlert(error).task(id: retry) {
             do {
                 let me = app.api.userID
                 async let outgoing = app.api.rows("follows?select=followed_id&follower_id=eq." + me)
@@ -90,8 +90,13 @@ struct RoomGifts: View {
     @State private var backpack = false
     @State private var operation = ""
     @State private var prices: [Int:Int] = [:]
-    @State private var inventory: [Int:Int] = [:]
-    @State private var balance: Int?
+    @State private var cloudInventory: [Int: Int] = [:]
+    @State private var cloudBalance: Int?
+    @EnvironmentObject private var wallet: WalletStore
+    private var inventory: [Int: Int] {
+        cloudInventory.merging(wallet.environment == .production ? (wallet.ledger?.inventory ?? [:]) : [:], uniquingKeysWith: +)
+    }
+    private var balance: Int? { cloudBalance.map { $0 + (wallet.environment == .production ? wallet.ledger?.balance ?? 0 : 0) } }
     @State private var confirm = false
     @State private var busy = false
     @State private var sent = false
@@ -145,7 +150,7 @@ struct RoomGifts: View {
                 }
                 if confirm { Button("Change selection") { confirm = false }.disabled(busy) }
             }
-            if !error.isEmpty { Text(error); Button("Refresh catalog") { retry += 1 } }
+            if !error.isEmpty { Button("Refresh catalog") { error = ""; retry += 1 } }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if !sent {
@@ -161,7 +166,7 @@ struct RoomGifts: View {
                     .background(Color(red: 0.91, green: 0.99, blue: 0.99))
             }
         }
-        .interactiveDismissDisabled(busy).task(id: retry) {
+        .minaAlert(error).interactiveDismissDisabled(busy).task(id: retry) {
             if retry == 0,let state = app.state(key) as? RoomRow {
                 index = min(max(0,state["index"] as? Int ?? 0),Self.names.count-1)
                 quantity = min(max(1,state["quantity"] as? Int ?? 1),99); recipient = state.roomText("recipient")
@@ -170,12 +175,13 @@ struct RoomGifts: View {
             if retry == 0, let initialRecipient, operation.isEmpty { recipient = initialRecipient }
             do {
                 let me = app.api.userID
+                try await app.gifts.recover()
                 async let wallets = app.api.rows("wallets?select=balance&owner_id=eq." + me)
                 async let catalog = app.api.rows("gift_catalog?select=gift_index,unit_price")
                 async let owned = app.api.rows("gift_inventory?select=gift_index,quantity&owner_id=eq." + me)
                 let (w,c,b) = try await (wallets,catalog,owned)
-                balance = w.first?["balance"] as? Int
-                prices = indexed(c,"unit_price"); inventory = indexed(b,"quantity"); error = ""
+                cloudBalance = w.first?["balance"] as? Int
+                prices = indexed(c,"unit_price"); cloudInventory = indexed(b,"quantity"); error = ""
             } catch { self.error = error.localizedDescription }
         }
     }
@@ -184,13 +190,22 @@ struct RoomGifts: View {
     }
     func send() {
         guard valid && !busy else { return }; busy = true
+        let owner = app.api.userID
         Task { defer { busy = false }; do {
+            let resumed = !operation.isEmpty
             if operation.isEmpty { operation = roomUUID() }
             try retain(operation)
-            let request: RoomRow = ["target_room":id,"recipient":recipient,"gift_index":index,"quantity":quantity,"operation":operation,"use_inventory":backpack]
-            let receipt = try await app.api.rest("rpc/send_gift",method: "POST",body: request) as? RoomRow
-            guard receipt?.roomText("id").lowercased() == operation.lowercased() else { throw MiNaIssue("The gift receipt could not be confirmed. Retry this selection.") }
-            balance = receipt?["balance"] as? Int; sent = true; confirm = false; try retain("")
-        } catch { self.error = error.localizedDescription } }
+            guard let price = prices[index] else { throw MiNaIssue("Refresh the gift catalog.") }
+            try await app.gifts.spend(id: operation, item: index, quantity: quantity, price: price,
+                                      room: id, recipient: recipient, fromBag: backpack, resumed: resumed)
+            guard owner == app.api.userID else { return }
+            try retain("")
+            sent = true
+            confirm = false
+        } catch {
+            guard owner == app.api.userID else { return }
+            if (error as? MiNaIssue)?.code == "gift_canceled" { operation = ""; try? retain("") }
+            self.error = error.localizedDescription
+        } }
     }
 }

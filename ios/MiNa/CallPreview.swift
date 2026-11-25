@@ -355,6 +355,9 @@ struct CallPreviewScreen: View {
             .foregroundStyle(.white).multilineTextAlignment(.center).padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 18)
         }
         .preferredColorScheme(.dark)
+        .minaAlert(media.micIssue)
+        .minaAlert(media.cameraIssue)
+        .minaAlert(media.outputIssue)
         .interactiveDismissDisabled()
         .task(id: sessionRevision) {
             guard !paused, phase != .background else { return }

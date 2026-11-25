@@ -22,6 +22,7 @@ struct RoomParticipant: Identifiable {
     @Published var connections = 0
     @Published var mic = "Off"
     @Published var notice = ""
+    @Published var problem = ""
     private var joined = ""
     private var lastBeat = Date.distantPast
     private var confirmed = Date.distantPast
@@ -170,7 +171,7 @@ struct RoomParticipant: Identifiable {
                             try await refreshAudio(api,id,incoming,generation)
                         } catch {
                             guard !Task.isCancelled, generation == epoch, audioGeneration == audioToken else { return }
-                            notice = "A voice connection was interrupted. Audio will retry."
+                            problem = "A voice connection was interrupted. Audio will retry."
                         }
                     }
                 }
@@ -243,7 +244,7 @@ struct RoomParticipant: Identifiable {
                 pendingSignals.removeValue(forKey: who)
             } catch {
                 try check(generation)
-                notice = "A voice connection was interrupted. Audio will retry."
+                problem = "A voice connection was interrupted. Audio will retry."
             }
         }
         for member in wanted {
@@ -258,7 +259,7 @@ struct RoomParticipant: Identifiable {
             } catch {
                 try check(generation)
                 peers.removeValue(forKey: who)?.link.close()
-                notice = "A voice connection was interrupted. Audio will retry."
+                problem = "A voice connection was interrupted. Audio will retry."
             }
         }
         try check(generation)

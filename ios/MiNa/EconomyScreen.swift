@@ -3,9 +3,15 @@ import SwiftUI
 struct EconomyScreen: View {
     @EnvironmentObject var app: MiNaAppModel
     let route: NativeRoute
-    @State private var balance: Int?
+    @State private var cloudBalance: Int?
+    @State private var cloudInventory: [Int: Int] = [:]
+    @EnvironmentObject private var wallet: WalletStore
+    private var balance: Int? {
+        guard let cloudBalance, let local = wallet.ledger?.balance else { return nil }
+        return wallet.environment == .production ? cloudBalance + local : max(cloudBalance, local)
+    }
+    private var inventory: [Int: Int] { cloudInventory.merging(wallet.ledger?.inventory ?? [:], uniquingKeysWith: +) }
     @State private var catalog: [Gift] = []
-    @State private var inventory: [Int: Int] = [:]
     @State private var level: [String: Any] = [:]
     @State private var returnGiftID: Int?
     @State private var navigateToWallet = false
@@ -57,13 +63,14 @@ struct EconomyScreen: View {
                     }
                 }
                 if !loaded && notice.isEmpty { ProgressView() }
-                if !notice.isEmpty { Text(notice); Button("Refresh") { Task { await load() } } }
+                if !notice.isEmpty { Button("Refresh") { Task { await load() } } }
             }.padding().frame(maxWidth: .infinity, alignment: .leading)
         }
         .navigationTitle(route.name == "level" ? "My level" : "Store")
         .navigationBarTitleDisplayMode(.inline)
 
         .background { AccountBackdrop(group: route.name == "level" ? "level" : "store") }
+        .minaAlert(notice)
         .task(id: route) {
             await load()
             if let id = returnGiftID, app.route == route, !Task.isCancelled {
@@ -95,7 +102,6 @@ struct EconomyScreen: View {
                             .disabled(balance == nil || busy).opacity(balance == nil || busy ? 0.48 : 1)
                     }
                 }
-                if !notice.isEmpty { Text(notice).font(.footnote) }
                 Button("Close") { selected = nil }.disabled(busy)
             }.padding().frame(maxWidth: .infinity,maxHeight: .infinity).background { NativeArt("spend",1).ignoresSafeArea() }.presentationDetents([.medium]).interactiveDismissDisabled(busy)
         }
@@ -104,17 +110,18 @@ struct EconomyScreen: View {
     private func load() async {
         do {
             let me = app.api.userID
-            balance = try await app.api.rows("wallets?select=balance&owner_id=eq." + me).first?["balance"] as? Int
             if route.name == "level" {
                 let response = try await app.api.rest("rpc/my_level", method: "POST", body: [String: String]())
                 level = (response as? [[String: Any]])?.first ?? [:]
             } else if route.name.hasPrefix("store") {
+                try await app.gifts.recover()
+                cloudBalance = try await app.api.rows("wallets?select=balance&owner_id=eq." + me).first?["balance"] as? Int
                 catalog = try await app.api.rows("gift_catalog?select=gift_index,unit_price&order=gift_index").compactMap { row in
                     guard let id = row["gift_index"] as? Int, Self.names.indices.contains(id), let price = row["unit_price"] as? Int else { return nil }
                     return Gift(id: id, price: price)
                 }
                 let items = try await app.api.rows("gift_inventory?select=gift_index,quantity&owner_id=eq." + me)
-                inventory = items.reduce(into: [:]) { values, row in
+                cloudInventory = items.reduce(into: [:]) { values, row in
                     if let id = row["gift_index"] as? Int, let quantity = row["quantity"] as? Int { values[id] = quantity }
                 }
             }
@@ -126,15 +133,22 @@ struct EconomyScreen: View {
         guard !busy else { return }
         busy = true
         defer { busy = false }
+        let owner = app.api.userID
+        let key = "store.operation." + String(gift.id)
         do {
-            let key = "store.operation." + String(gift.id)
-            let operation = app.state(key) as? String ?? UUID().uuidString
+            let savedOperation = app.state(key) as? String
+            let operation = savedOperation ?? UUID().uuidString
             try app.save(key, operation)
-            try await app.api.rest("rpc/acquire_gift", method: "POST", body: ["gift_index":gift.id, "quantity":1, "operation":operation] as [String: Any])
+            try await app.gifts.spend(id: operation, item: gift.id, quantity: 1, price: gift.price, resumed: savedOperation != nil)
+            guard owner == app.api.userID else { return }
             try app.save(key, nil)
             selected = nil
             await load()
-        } catch { notice = error.localizedDescription }
+        } catch {
+            guard owner == app.api.userID else { return }
+            if (error as? MiNaIssue)?.code == "gift_canceled" { try? app.save(key, nil) }
+            notice = error.localizedDescription
+        }
     }
 }
 

@@ -1,5 +1,4 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct CommunityComposer: View {
     @EnvironmentObject var app: MiNaAppModel
@@ -31,30 +30,25 @@ struct CommunityComposer: View {
             VStack(alignment: .leading, spacing: 18) {
                 if isRecorder { recorderControls } else { editor }
                 if !status.isEmpty { ProgressView(status) }
-                if !message.isEmpty { Text(message).font(.callout).accessibilityLabel(message) }
             }.padding(.horizontal,18).padding(.vertical,6).frame(minHeight: bounds.size.height, alignment: .top)
           }
         }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(.hidden, for: .navigationBar)
+        .minaAlert(message)
+        .minaAlert(recoveryNeeded && message.isEmpty ? "The recording was interrupted." : "")
         .onAppear {
             visible = true
             account = app.api.userID
             draft = journal[key] as? CommunityRow ?? ["id":UUID().uuidString.lowercased(),"text":""]
             published = false
             if isRecorder { recover() }
-            else if let media {
-                perform {
-                    if try app.media.storedAsset(media.communityString("id")) == nil {
-                        var next = draft
-                        next.removeValue(forKey: "media")
-                        next["id"] = UUID().uuidString.lowercased()
-                        try save(next)
-                        message = dream ? "This recording is no longer on this iPhone. Record a new take to publish." : "This video is no longer on this iPhone. Choose a video to publish."
-                    }
-                }
-            }
+
+        }
+        .task(id: transferKey) {
+            guard !account.isEmpty else { return }
+            await transferDraft()
         }
         .onDisappear {
             visible = false
@@ -109,7 +103,7 @@ struct CommunityComposer: View {
             }
             Button { work { try await publish() } } label: {
                 Text(dream ? "Publish dream" : "Publish post").communityPrimary()
-            }.disabled(media == nil).opacity(media == nil ? 0.72 : 1).padding(.horizontal,4).padding(.top,32)
+            }.disabled(media?["path"] == nil).opacity(media == nil ? 0.72 : 1).padding(.horizontal,4).padding(.top,32)
         }.disabled(busy)
     }
     private var caption: some View {
@@ -123,8 +117,27 @@ struct CommunityComposer: View {
                 .background(.white,in: RoundedRectangle(cornerRadius:14))
         }
     }
-    private func preview(_ item: CommunityRow) -> some View {
-        CommunityMedia(path: item.communityString("id"), duration: item.communitySeconds("duration"), voice: dream, remote: false)
+    private var transferKey: String {
+        [account, media?.communityString("id") ?? "", candidate?.communityString("id") ?? ""].joined(separator: "|")
+    }
+    private func transferDraft() async {
+        do {
+            for field in ["media", "candidate"] {
+                try Task.checkCancellation()
+                try await app.uploadDraft(key, field: field, owner: account)
+            }
+        } catch { if !Task.isCancelled { message = error.localizedDescription } }
+        if account == app.api.userID, let latest = journal[key] as? CommunityRow { draft = latest }
+    }
+    @ViewBuilder private func preview(_ item: CommunityRow) -> some View {
+        if let path = item["path"] as? String {
+            CommunityMedia(path: path, duration: item.communitySeconds("duration"), voice: dream)
+        } else {
+            VStack(spacing: 8) {
+                if message.isEmpty { ProgressView("Uploading…") }
+                else { Button("Retry upload") { work { message = ""; await transferDraft() } } }
+            }.frame(maxWidth: .infinity)
+        }
     }
     @ViewBuilder private var recorderControls: some View {
         VStack(spacing: 18) {
@@ -134,7 +147,6 @@ struct CommunityComposer: View {
             Spacer(minLength:90)
             if !recording, let candidate { preview(candidate) }
             if recoveryNeeded {
-                Text("The recording was interrupted.")
                 Button("Recover take") { recover() }
                 Button("Finish recovery") { perform {
                     let last = try app.media.recover()
@@ -154,7 +166,7 @@ struct CommunityComposer: View {
                     let previous = media
                     var next = draft; next["media"] = candidate; next.removeValue(forKey: "candidate"); next["id"] = UUID().uuidString.lowercased()
                     try save(next); clean(previous); app.back()
-                } }.buttonStyle(CommunitySaveStyle()).disabled(pending != nil || recording)
+                } }.buttonStyle(CommunitySaveStyle()).disabled(pending != nil || recording || candidate["path"] == nil)
             }
         }.frame(maxWidth: .infinity).padding(.bottom,24).disabled(busy)
     }
@@ -174,10 +186,22 @@ struct CommunityComposer: View {
     }
     private func save(_ next: CommunityRow) throws {
         try verifyAccount()
-        var latest = journal; latest[key] = next
-        try app.save(journalKey,latest); draft = next
+        var updated = next
+        var latest = journal
+        let current = latest[key] as? CommunityRow
+        for field in ["media", "candidate"] {
+            if var item = updated[field] as? CommunityRow, item["path"] == nil,
+               let committed = current?[field] as? CommunityRow,
+               committed["id"] as? String == item["id"] as? String, let path = committed["path"] as? String {
+                item["path"] = path
+                updated[field] = item
+            }
+        }
+        latest[key] = updated
+        try app.save(journalKey, latest)
+        draft = updated
     }
-    private func clean(_ item: CommunityRow?) {
+    private func clean(_ item: CommunityRow?, discarded: Bool = true) {
         guard account == app.api.userID, let id = item?["id"] as? String else { return }
         for case let entry as CommunityRow in journal.values {
             for field in ["media","candidate","pending"] {
@@ -186,6 +210,9 @@ struct CommunityComposer: View {
             }
         }
         try? app.media.remove(id)
+        if discarded, let path = item?["path"] as? String {
+            Task { try? await app.discardUnusedCapture(path) }
+        }
     }
     private func pick() async throws {
         status = "Importing video…"
@@ -203,23 +230,22 @@ struct CommunityComposer: View {
         status = "Checking draft…"
         let existing = try await app.api.rows("entries?select=id&id=eq." + id + "&owner_id=eq." + account)
         if existing.isEmpty {
-            status = "Preparing media…"
-            guard let raw = try app.media.resolve(take.communityString("id"))["url"] as? String, let url = URL(string: raw), url.isFileURL else { throw MiNaIssue("This file could not be opened.") }
-            let data = try await Task.detached { try Data(contentsOf: url, options: .mappedIfSafe) }.value
-            guard !data.isEmpty, data.count <= 50 * 1024 * 1024 else { throw MiNaIssue("Choose a file of 50 MB or less.") }
-            try verifyAccount()
-            status = dream ? "Uploading recording…" : "Uploading video…"
-            let ext = url.pathExtension.lowercased()
-            let path = try await app.api.upload(data, type: UTType(filenameExtension: ext)?.preferredMIMEType ?? "application/octet-stream", extension: ext, id: id)
-            try verifyAccount()
+            guard let path = take["path"] as? String, path.hasPrefix(account + "/") else {
+                throw MiNaIssue("Wait for the media upload before publishing.")
+            }
             status = "Publishing…"
             let entry: CommunityRow = ["id":id,"owner_id":account,"kind":dream ? "dream" : "post","caption":draft.communityString("text").trimmingCharacters(in: .whitespacesAndNewlines),"media_path":path,"duration":take.communitySeconds("duration")]
             _ = try await app.api.rest("entries",method: "POST",body: entry,prefer: "resolution=ignore-duplicates")
         }
         try verifyAccount()
+        guard let confirmed = try await app.api.rows("entries?select=id,media_path&id=eq." + id + "&owner_id=eq." + account).first,
+              confirmed["id"] as? String == id, !(confirmed.communityString("media_path")).isEmpty else {
+            throw MiNaIssue("The publication could not be confirmed. Please try again.")
+        }
+        try verifyAccount()
         var latest = journal
         if (latest[key] as? CommunityRow)?.communityString("id") == id {
-            latest.removeValue(forKey: key); try app.save(journalKey,latest); clean(take); clean(candidate)
+            latest.removeValue(forKey: key); try app.save(journalKey,latest); clean(take, discarded: false); clean(candidate)
         }
         published = true
         draft = [:]

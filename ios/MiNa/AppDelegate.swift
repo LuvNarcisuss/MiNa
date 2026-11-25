@@ -6,7 +6,7 @@ struct MiNaApplication: App {
 
     var body: some Scene {
         WindowGroup {
-            MiNaRoot().environmentObject(model)
+            CloudLaunch().environmentObject(model).environmentObject(model.wallet)
         }
     }
 }

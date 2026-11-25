@@ -28,6 +28,7 @@ final class MiNaAPI {
     private var session: [String: Any]?
     private var renewal: Task<String, Error>?
     private var generation = UUID()
+    var sessionExpired: (() -> Bool)?
 
     var userID: String {
         ((session?["user"] as? [String: Any])?["id"] as? String ?? "").lowercased()
@@ -43,6 +44,11 @@ final class MiNaAPI {
     func signIn(email: String, password: String, expectedOwner: String? = nil) async throws {
         close()
         _ = try await authenticate("token?grant_type=password", body: ["email": email, "password": password], expectedOwner: expectedOwner)
+    }
+
+    func signUp(email: String, password: String) async throws {
+        close()
+        _ = try await authenticate("signup", body: ["email": email, "password": password])
     }
 
     // Use the original device session until email verification and password setup both finish.
@@ -151,13 +157,23 @@ final class MiNaAPI {
         if let token { request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization") }
         if payload != nil { request.setValue(type, forHTTPHeaderField: "Content-Type") }
         if let prefer { request.setValue(prefer, forHTTPHeaderField: "Prefer") }
-        let transport = path.hasPrefix("/auth/v1/") ? Self.authTransport : URLSession.shared
+        let transport = path.hasPrefix("/auth/v1/") ? Self.authTransport : CloudInterface.transport
         let (data, response) = try await transport.data(for: request)
         guard initial == generation else { throw CancellationError() }
         guard let http = response as? HTTPURLResponse else { throw MiNaIssue("The service did not respond.") }
         guard (200..<300).contains(http.statusCode) else {
             let detail = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
             let reason = ["message", "msg", "error_description", "error"].compactMap { detail?[$0] as? String }.first
+            let code = (detail?["error_code"] ?? detail?["code"]) as? String ?? ""
+            let companionUnauthorized = http.statusCode == 401 && ["/functions/v1/companion-chat", "/rest/v1/rpc/open_companion_session"].contains(path)
+            if companionUnauthorized || ["PT401", "user_not_found", "session_not_found", "refresh_token_not_found", "refresh_token_already_used"].contains(code),
+               !userID.isEmpty {
+                if sessionExpired?() == true { throw CancellationError() }
+                throw MiNaIssue("Your session has expired. Please sign in again.")
+            }
+            if code.hasPrefix("PGRST") || code.range(of: "^[0-9A-Z]{5}$", options: .regularExpression) != nil && code != "P0001" {
+                throw MiNaIssue("MiNa couldn’t complete the request. Please try again.", code: code)
+            }
             throw MiNaIssue(reason ?? "The service could not complete this request (\(http.statusCode)).",
                             code: detail?["error_code"] as? String)
         }
@@ -209,6 +225,19 @@ final class MiNaAPI {
         return url
     }
 
+    func removeUnusedCapture(_ path: String, owner: String) async throws {
+        guard owner == userID, path.hasPrefix(owner + "/") else { return }
+        // Only paths generated for this owner's unfinished audio/video captures are eligible.
+        let filename = String(path.dropFirst(owner.count + 1))
+        let name = (filename as NSString).deletingPathExtension
+        guard UUID(uuidString: name) != nil,
+              ["mp4", "mov", "m4a"].contains((filename as NSString).pathExtension) else { return }
+        let referenced = try await rows("entries?select=id&media_path=eq." + path + "&limit=1")
+        guard referenced.isEmpty, owner == userID else { return }
+        _ = try await request("/storage/v1/object/mina-media", method: "DELETE",
+            payload: JSONSerialization.data(withJSONObject: ["prefixes": [path]]), token: accessToken())
+    }
+
     func deleteEntry(_ id: String) async throws {
         let parameters = ["p_id": id]
         let result = try await rest("rpc/prepare_entry_deletion", method: "POST", body: parameters)
@@ -234,7 +263,11 @@ final class MiNaAPI {
         do {
             _ = try await request("/storage/v1/object/mina-media/" + path, method: "POST", payload: data, type: type, token: accessToken())
         } catch let error as MiNaIssue {
-            guard error.message.localizedCaseInsensitiveContains("already exists") || error.message.localizedCaseInsensitiveContains("duplicate") else { throw error }
+            guard error.code == "23505" || error.message.localizedCaseInsensitiveContains("already exists") || error.message.localizedCaseInsensitiveContains("duplicate") else { throw error }
+            let signed = try await mediaURL(path)
+            guard try await CloudInterface.bytes(signed) == data else {
+                throw MiNaIssue("A different file already uses this media name.")
+            }
         }
         return path
     }
@@ -253,10 +286,12 @@ final class MiNaAPI {
         return text
     }
 
-    func purchase(_ body: [String: String]) async throws -> [String: Any] {
-        let response = try await request("/functions/v1/wallet-purchase", method: "POST",
-            payload: JSONSerialization.data(withJSONObject: body), token: accessToken())
-        guard let result = response as? [String: Any] else { throw MiNaIssue("Your wallet could not confirm this request.") }
+    func giftRequest(_ path: String, body: [String: Any], owner: String) async throws -> [String: Any] {
+        let token = try await accessToken()
+        guard !owner.isEmpty, owner == userID else { throw CancellationError() }
+        let response = try await request(path, method: "POST",
+            payload: JSONSerialization.data(withJSONObject: body), token: token)
+        guard let result = response as? [String: Any] else { throw MiNaIssue("Gift authorization is unavailable.") }
         return result
     }
 
