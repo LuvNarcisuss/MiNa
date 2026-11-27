@@ -143,8 +143,9 @@ struct CommunityMedia: View {
                 if !playing && !fullscreen { nativeControls = false }
             }
             .sheet(isPresented: $showingCaption) {
-                ScrollView { Text(caption ?? "").frame(maxWidth: .infinity, alignment: .leading).padding(24) }
-                    .presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
+                PopupPanel(title: "Caption", closeLabel: "Close", close: { showingCaption = false }) {
+                    Text(caption ?? "").foregroundStyle(PopupTheme.ink)
+                }.modifier(FittedPopup())
             }
     }
 }

@@ -30,12 +30,48 @@ struct ProfileScreen: View {
     @State private var ready = false
     @State private var notice = ""
     @State private var safety: String?
-    @State private var reports: [ProfileRecord] = []
+    private enum ReportStatus: String {
+        case pending = "Pending review"
+        case reviewed = "Reviewed"
+        case withdrawn = "Withdrawn"
+
+        var tint: Color {
+            switch self {
+            case .pending: return Color(red: 0.51, green: 0.31, blue: 0.04)
+            case .reviewed: return Color(red: 0.04, green: 0.41, blue: 0.35)
+            case .withdrawn: return Color(red: 0.33, green: 0.36, blue: 0.40)
+            }
+        }
+    }
+
+    private struct ReportRecord: Identifiable {
+        let id, kind, label, reason: String
+        var status: ReportStatus
+
+        init(_ row: ProfileRecord) throws {
+            guard let id = row["id"] as? String else { throw MiNaIssue("Report history could not be loaded.") }
+            self.id = id
+            kind = (row["target_kind"] as? String ?? "Item").capitalized
+            label = row["target_label"] as? String ?? ""
+            reason = row["reason"] as? String ?? ""
+            if row["withdrawn_at"] is String {
+                status = .withdrawn
+            } else if row["reviewed_at"] is String {
+                status = .reviewed
+            } else {
+                status = .pending
+            }
+        }
+    }
+    @State private var reports: [ReportRecord] = []
     @State private var undo: SafetyUndo?
     private enum SafetyUndo: Identifiable {
         case unblock(String, String), withdraw(String)
         var id: String {
             switch self { case .unblock(let id, _), .withdraw(let id): return id }
+        }
+        var confirmLabel: String {
+            switch self { case .unblock: return "Unblock"; case .withdraw: return "Withdraw" }
         }
         var title: String {
             switch self { case .unblock(_, let name): return "Unblock " + name + "?"
@@ -43,9 +79,7 @@ struct ProfileScreen: View {
         }
     }
     @State private var reportOpen = false
-    @State private var reportReason = "Harassment"
-    @State private var reportContext = ""
-    @State private var reportID = UUID()
+    @State private var reportedProfile = false
     private var me: String { app.api.userID }
     private var other: String { route.name == "person" ? route.id ?? me : me }
     private var following: Set<String> { Set(edges.filter { $0["follower_id"] as? String == other }.compactMap { $0["followed_id"] as? String }) }
@@ -70,10 +104,9 @@ struct ProfileScreen: View {
             else if route.name == "person" && other != me { publicProfile }
             else { overview }
         }
-        .frame(maxWidth: .infinity,maxHeight: .infinity)
-        .background { AccountBackdrop(group: route.name == "profile" ? "profile" : route.name == "person" ? "publicProfile" : "edit") }
+        .pageBackground(route.name == "profile" ? "profile" : route.name == "person" ? "publicProfile" : "edit")
         .minaAlert(notice)
-        .safeAreaInset(edge: .bottom) {
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             if !notice.isEmpty && (route.name != "profile.edit" || editingOwner.isEmpty) {
                 Button("Reload") { Task { await load() } }.padding(10)
             }
@@ -87,60 +120,81 @@ struct ProfileScreen: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(isPresented: $reportOpen) {
-            Form {
-                Section("Report profile") {
-                    Picker("Reason", selection: $reportReason) {
-                        ForEach(["Harassment","Sexual content","Harmful content","Privacy concern","Spam","Other"],id: \.self) { Text($0) }
-                    }
-                    TextField("Additional details (optional)",text: $reportContext,axis: .vertical)
-                }
-                Button("Submit report") { Task { await submitReport() } }
-                Button("Cancel") { reportOpen = false }
-            }.disabled(busy).presentationDetents([.medium])
+        .sheet(isPresented: $reportOpen, onDismiss: {
+            if reportedProfile {
+                reportedProfile = false
+                if app.route == route { app.back() }
+                app.safetyChanged()
+            }
+        }) {
+            ReportForm(targetID: other, kind: "profile", targetName: profile["name"] as? String) {
+                reportedProfile = true
+            }
         }
-        .confirmationDialog(safety ?? "", isPresented: Binding(get: { safety != nil }, set: { if !$0 { safety = nil } }), titleVisibility: .visible) {
+        .popupDialog(safety ?? "", isPresented: Binding(get: { safety != nil }, set: { if !$0 { safety = nil } })) {
             if safety == "Block listener?" {
-                Button("Block", role: .destructive) { Task { await perform {
+                PopupAction("Block", "person.crop.circle.badge.minus", role: .destructive) { Task { await perform {
                     try await app.blockMember(other, name: profile["name"] as? String ?? "Listener")
                 } } }
             }
         }
-        .alert(undo?.title ?? "", isPresented: Binding(get: { undo != nil }, set: { if !$0 { undo = nil } }), presenting: undo) { action in
-            Button("Cancel", role: .cancel) {}
-            Button("Confirm", role: .destructive) { Task { await perform {
-                switch action {
-                case .unblock(let id, _):
-                    try await app.api.rest("blocks?owner_id=eq." + me + "&blocked_id=eq." + id, method: "DELETE")
-                case .withdraw(let id):
-                    try await app.api.rest("rpc/withdraw_report", method: "POST", body: ["receipt": id])
-                }
-                app.safetyChanged()
-            } } }
+        .popupDialog(undo?.title ?? "", isPresented: Binding(get: { undo != nil }, set: { if !$0 { undo = nil } })) {
+            if let action = undo {
+                PopupAction(action.confirmLabel, "arrow.uturn.backward", role: .destructive) { Task { await perform {
+                    switch action {
+                    case .unblock(let id, _):
+                        try await app.api.rest("blocks?owner_id=eq." + me + "&blocked_id=eq." + id, method: "DELETE")
+                    case .withdraw(let id):
+                        try await app.api.rest("rpc/withdraw_report", method: "POST", body: ["receipt": id])
+                        if let index = reports.firstIndex(where: { $0.id == id }) { reports[index].status = .withdrawn }
+                    }
+                    app.safetyChanged()
+                } } }
+            }
         }
     }
 
     private var reportHistory: some View {
         List {
             if !ready { ProgressView() }
-            else if reports.isEmpty { Text("You have no reports.") }
-            ForEach(reports.indices, id: \.self) { index in
-                let row = reports[index]
-                if let id = row["id"] as? String {
+            else if reports.isEmpty && notice.isEmpty { Text("You have no reports.") }
+            ForEach(reports) { report in
+                HStack(spacing: 8) {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text((row["target_kind"] as? String ?? "Item").capitalized).font(.caption)
-                        Text(row["target_label"] as? String ?? "Reported item").font(.headline)
-                        Text(row["reason"] as? String ?? "")
-                        Text("Receipt " + String(id.prefix(8))).font(.caption)
-                        if row["withdrawn_at"] is String { Text("Withdrawn").foregroundStyle(.secondary) }
-                        else { Button("Withdraw report") { undo = .withdraw(id) }.disabled(busy) }
-                    }.padding(.vertical, 3)
-                    .contextMenu {
-                        if !(row["withdrawn_at"] is String) { Button("Withdraw report") { undo = .withdraw(id) } }
+                        HStack(spacing: 6) {
+                            Text(report.kind).font(.caption)
+                            Text(report.status.rawValue)
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(report.status.tint)
+                                .padding(.horizontal, 8).padding(.vertical, 3)
+                                .background(report.status.tint.opacity(0.11), in: Capsule())
+                        }
+                        Text(report.label.isEmpty ? "Reported item" : report.label).font(.headline)
+                        Text(report.reason)
+                        Text("Receipt " + String(report.id.prefix(8))).font(.caption)
                     }
-                }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    if report.status != .withdrawn {
+                        Button { undo = .withdraw(report.id) } label: {
+                            Image(systemName: "arrow.uturn.backward")
+                                .font(.body.weight(.semibold))
+                                .foregroundStyle(.tint)
+                                .padding(8)
+                                .background(.tint.opacity(0.1), in: Circle())
+                                .frame(minWidth: 44, minHeight: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Withdraw report")
+                        .disabled(busy)
+                    }
+                }.padding(.vertical, 4)
             }
-        }.navigationTitle("Report history")
+        }
+        .scrollContentBackground(.hidden)
+        .listStyle(.insetGrouped)
+        .refreshable { await load() }
+        .navigationTitle("Report history")
     }
 
     private var overview: some View {
@@ -206,10 +260,13 @@ struct ProfileScreen: View {
 
     private var publicProfile: some View {
         GeometryReader { viewport in
+            let coverHeight = viewport.size.width * 526 / 390
+            let overlap: CGFloat = 20
+            let fullHeight = viewport.size.height + viewport.safeAreaInsets.top + viewport.safeAreaInsets.bottom
             ScrollView {
-                VStack(spacing: -20) {
+                VStack(spacing: -overlap) {
                     publicHeader
-                        .frame(minHeight: viewport.size.width * 526 / 390, alignment: .bottom)
+                        .frame(minHeight: coverHeight, alignment: .bottom)
                         .background {
                             GeometryReader { box in
                                 ZStack {
@@ -241,23 +298,21 @@ struct ProfileScreen: View {
                         }
                         publicWork
                     }
-                    .padding(20).frame(maxWidth: .infinity, alignment: .leading)
-                    .background(alignment: .top) {
-                        ZStack(alignment: .top) {
-                            Color(red: 0.92, green: 0.99, blue: 0.99)
-                            NativeArt("publicProfile", 2).scaledToFit()
-                        }
+                    .padding(20)
+                    .padding(.bottom, viewport.safeAreaInsets.bottom)
+                    .frame(maxWidth: .infinity, minHeight: max(0, fullHeight - coverHeight + overlap), alignment: .topLeading)
+                    .background {
+                        NativeArt("publicProfile", 2).accessibilityHidden(true)
                     }
-                    .clipShape(RoundedRectangle(cornerRadius: 20))
                 }
-            }.ignoresSafeArea(edges: .top)
+            }.ignoresSafeArea(.container, edges: .vertical)
             .overlay(alignment: .top) {
                 HStack {
                     Button { app.back() } label: { coverControl(3) }.accessibilityLabel("Back")
                     Spacer()
-                    Menu {
-                        Button("Report profile") { notice = ""; reportOpen = true }
-                        Button("Block listener", role: .destructive) { safety = "Block listener?" }
+                    PopupMenu("Profile options") {
+                        PopupAction("Report profile", "flag") { notice = ""; reportOpen = true }
+                        PopupAction("Block listener", "person.crop.circle.badge.minus", role: .destructive) { safety = "Block listener?" }
                     } label: { coverControl(12) }.accessibilityLabel("More")
                 }.padding(.horizontal, 10)
             }
@@ -394,7 +449,7 @@ struct ProfileScreen: View {
                         if route.name == "profile.blocked" {
                             Button("Unblock") { undo = .unblock(id, item["name"] as? String ?? "listener") }
                                 .disabled(busy)
-                                .contextMenu { Button("Unblock") { undo = .unblock(id, item["name"] as? String ?? "listener") } }
+                                .simultaneousGesture(LongPressGesture().onEnded { _ in undo = .unblock(id, item["name"] as? String ?? "listener") })
                         } else { Button("View") { app.go("person", id) } }
                     }
                 }
@@ -411,7 +466,7 @@ struct ProfileScreen: View {
             VStack(alignment: .leading,spacing: 16) {
                 field("Nickname","name")
                 Text("Profile photo").font(.caption).foregroundStyle(.secondary)
-                Button { Task { await pickAvatar() } } label: {
+                MediaSourceMenu(title: "Choose an image", choose: { source in Task { await pickAvatar(from: source) } }) {
                     ZStack(alignment: .bottom) {
                         if let avatarImage {
                             Image(uiImage: avatarImage).resizable().scaledToFill().frame(width: 116,height: 116).clipped()
@@ -426,9 +481,9 @@ struct ProfileScreen: View {
                     HStack {
                         Text("Gender").font(.caption).foregroundStyle(.secondary)
                         Spacer()
-                        Menu {
-                            Button("Nonbinary") { profile["gender"] = "Nonbinary" }
-                            Button("Prefer not to say") { profile["gender"] = "" }
+                        PopupMenu("Gender") {
+                            PopupAction("Nonbinary", "person", selected: profile["gender"] as? String == "Nonbinary") { profile["gender"] = "Nonbinary" }
+                            PopupAction("Prefer not to say", "person", selected: (profile["gender"] as? String ?? "").isEmpty) { profile["gender"] = "" }
                         } label: {
                             Text((profile["gender"] as? String) == "Nonbinary" ? "Nonbinary" : (profile["gender"] as? String ?? "").isEmpty ? "Prefer not to say" : "More options")
                                 .font(.caption).padding(.vertical,5)
@@ -515,6 +570,14 @@ struct ProfileScreen: View {
             notice = ""
             let owner = other
             guard UUID(uuidString: owner) != nil else { throw MiNaIssue("This listener is unavailable.") }
+            if route.name == "profile.reports" {
+                let records = try await app.api.rows("reports?select=id,target_kind,target_label,reason,reviewed_at,withdrawn_at&reporter_id=eq." + owner + "&order=created_at.desc,id.desc").map(ReportRecord.init)
+                try Task.checkCancellation()
+                guard loadID == version, app.api.userID == owner else { return }
+                reports = records
+                ready = true
+                return
+            }
             let remote = try await app.api.rows("profiles?select=*&id=eq." + owner).first ?? [:]
             if route.name == "profile.edit" {
                 guard !remote.isEmpty, let settings = try await app.api.rows("personal_settings?select=birthday&id=eq." + owner).first else {
@@ -540,9 +603,7 @@ struct ProfileScreen: View {
                 videoCount = try await app.api.rest("entry_feed?select=id&owner_id=eq." + owner + "&kind=eq.post&limit=1", method: "HEAD", prefer: "count=exact") as? Int
             }
             if route.name == "profile" { app.didRefreshRoot("profile") }
-            if route.name == "profile.reports" {
-                reports = try await app.api.rows("reports?select=id,target_kind,target_label,reason,withdrawn_at&reporter_id=eq." + me + "&order=created_at.desc")
-            } else if route.name == "profile.blocked" {
+            if route.name == "profile.blocked" {
                 let names = app.state("people") as? [String:String] ?? [:]
                 people = try await app.api.rows("blocks?select=blocked_id,blocked_name&owner_id=eq." + me).compactMap { row in
                     guard let id = row["blocked_id"] as? String else { return nil }
@@ -588,23 +649,14 @@ struct ProfileScreen: View {
         }
     }
 
-    private func submitReport() async {
-        await perform {
-            let receipt = try await app.api.report(other, kind: "profile", reason: reportReason, details: reportContext, operation: reportID)
-            reportOpen = false; reportID = UUID(); reportContext = ""
-            app.back(); app.safetyChanged()
-            app.safetyNotice = "Report received · " + String(receipt.prefix(8))
-        }
-    }
-
     private func discardAvatar() {
         avatarData = nil
         avatarID = nil; avatarImage = nil; uploadedAvatar = nil
     }
 
-    private func pickAvatar() async {
+    private func pickAvatar(from source: DeviceMedia.Source) async {
         await perform {
-            let chosen = try await app.pick("image")
+            let chosen = try await app.pick("image", from: source)
             guard let id = chosen["id"] as? String else { return }
             guard me == editingOwner, let raw = chosen["url"] as? String, let url = URL(string: raw),
                   let data = try? Data(contentsOf: url), let image = UIImage(data: data) else {
@@ -668,15 +720,6 @@ struct ProfileScreen: View {
             catch { throw MiNaIssue("Your profile is saved on MiNa. Tap Save to retry updating this iPhone’s local copy.") }
             app.back()
         }
-    }
-}
-
-struct AccountBackdrop: View {
-    let group: String
-    var body: some View {
-        GeometryReader { box in
-            NativeArt(group,1).frame(width: box.size.width,height: box.size.height)
-        }.ignoresSafeArea().accessibilityHidden(true)
     }
 }
 

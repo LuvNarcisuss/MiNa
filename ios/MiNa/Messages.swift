@@ -85,6 +85,7 @@ private struct MessageListScreen: View {
     @State private var busy = false
     @State private var loading = false
     @State private var refreshPending = false
+    @State private var revealedPeer: String?
     @State private var clear: InboxRow?
     @State private var confirmCall = false
     @Environment(\.scenePhase) private var phase
@@ -154,26 +155,36 @@ private struct MessageListScreen: View {
                     .overlay { Capsule().stroke(.white.opacity(0.6), lineWidth: 1) }.padding(.horizontal, 18).padding(.bottom, 8)
             }
             if !loaded && error.isEmpty { ProgressView().padding() }
-            ScrollViewReader { proxy in
-            List {
-                Group {
-                    if inbox { inboxContent }
-                    else if thread { threadContent }
-                    else if calls { callContent }
-                    else { noticeContent }
-                }.listRowSeparator(.hidden).listRowInsets(EdgeInsets(top: 4, leading: 18, bottom: 4, trailing: 18)).listRowBackground(Color.clear)
-            }.listStyle(.plain).scrollContentBackground(.hidden)
-            .onChange(of: rows.first?.id) { newest in
-                if thread, let newest, lastRead.isEmpty || rows.first?.string("sender_id") == me {
-                    proxy.scrollTo(newest, anchor: .bottom)
+            if inbox {
+                ScrollView {
+                    LazyVStack(spacing: 8) { inboxContent }
+                        .padding(.horizontal, 18).padding(.vertical, 4)
                 }
-            }
+            } else {
+                ScrollViewReader { proxy in
+                    List {
+                        Group {
+                            if thread { threadContent }
+                            else if calls { callContent }
+                            else { noticeContent }
+                        }
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 4, leading: 18, bottom: 4, trailing: 18))
+                        .listRowBackground(Color.clear)
+                    }
+                    .listStyle(.plain).scrollContentBackground(.hidden)
+                    .onChange(of: rows.first?.id) { newest in
+                        if thread, let newest, lastRead.isEmpty || rows.first?.string("sender_id") == me {
+                            proxy.scrollTo(newest, anchor: .bottom)
+                        }
+                    }
+                }
             }
             if thread { composer }
         }
         .buttonStyle(.plain)
         .toolbar(.hidden, for: .navigationBar)
-        .background { NativeArt(inbox ? "inbox" : thread ? "chat" : category ? "noticeDetail" : "notice",1).ignoresSafeArea().accessibilityHidden(true) }
+        .pageBackground(inbox ? "inbox" : thread ? "chat" : category ? "noticeDetail" : "notice")
         .minaAlert(error)
         .task {
             if thread, let saved = app.state(draftKey) as? [String:String] {
@@ -189,19 +200,11 @@ private struct MessageListScreen: View {
             if thread && next == .active { Task { await refresh() } }
         }
         .onReceive(NotificationCenter.default.publisher(for: .inboxUpdated)) { _ in Task { await refresh() } }
-        .overlay {
+        .popupDialog("Delete this conversation?", isPresented: Binding(get: { clear != nil }, set: { if !$0 { clear = nil } }),
+                     message: "This removes the conversation from your inbox.") {
             if let selected = clear {
-                ZStack(alignment: .bottom) {
-                    Color.black.opacity(0.4).ignoresSafeArea().onTapGesture { clear = nil }
-                    VStack(spacing: 16) {
-                        Text("Delete this conversation?").font(.headline)
-                        Text("This removes the conversation from your inbox.").font(.subheadline)
-                        Button("Delete", role: .destructive) {
-                            clear = nil
-                            operate { try await mark(selected.id, selected.string("latest_id"), clear: true) }
-                        }.frame(maxWidth: .infinity).padding(12).background(.white, in: Capsule())
-                        Button("Cancel") { clear = nil }
-                    }.padding(24).frame(maxWidth: .infinity).background(Color(red: 0.88, green: 0.98, blue: 0.96), in: RoundedRectangle(cornerRadius: 22))
+                PopupAction("Delete", "trash", role: .destructive) {
+                    operate { try await mark(selected.id, selected.string("latest_id"), clear: true) }
                 }
             }
         }
@@ -211,8 +214,8 @@ private struct MessageListScreen: View {
             }
         }
         .onChange(of: isFriend) { if !$0 { preview = nil; confirmCall = false; showEmoji = false } }
-        .confirmationDialog("Start a voice call?", isPresented: $confirmCall) {
-            Button("Call \(title)") { operate {
+        .popupDialog("Start a voice call?", isPresented: $confirmCall) {
+            PopupAction("Call \(title)", "phone") { operate {
                 let result = try await rpc("start_voice_call", ["p_id": dialID, "p_peer": peer])
                 guard let id = result as? String, UUID(uuidString: id) != nil else { throw VoiceFailure("The call could not be confirmed.") }
                 dialID = UUID().uuidString.lowercased()
@@ -240,7 +243,20 @@ private struct MessageListScreen: View {
         ForEach(pins.compactMap { byPeer[$0] } + filtered.filter { !pins.contains($0.id) }) { row in
             let pinned = pins.contains(row.id)
             let unread = isUnread(row)
-            Button { app.go("messages.thread",row.id) } label: {
+            ConversationSwipeRow(id: row.id, revealed: $revealedPeer, pinned: pinned, unread: unread, open: {
+                app.go("messages.thread", row.id)
+            }, pin: {
+                do {
+                    let remaining = pinnedPeers.filter { $0 != row.id }
+                    try app.save("chat.pinnedPeers", pinned ? remaining : [row.id] + remaining)
+                } catch { self.error = error.localizedDescription }
+            }, markRead: {
+                if unread { operate { try await mark(row.id, row.string("latest_id")) } }
+                else {
+                    do { try app.save("chat.unreadPeers", unreadPeers + [row.id]) }
+                    catch { self.error = error.localizedDescription }
+                }
+            }, delete: { clear = row }) {
                 HStack { InboxAvatar(person: people[row.id]); VStack(alignment: .leading) {
                     Text(people[row.id]?.string("name") ?? "Listener").bold()
                     Text(row.roomID == nil ? row.string("body") : "Voice room invitation").font(ReactionPicker.textFont(for: row.string("body"))).lineLimit(1).foregroundStyle(.secondary)
@@ -261,25 +277,6 @@ private struct MessageListScreen: View {
                     }
                 }.messageCard()
             }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("conversation-" + row.id)
-            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                Button("Delete") { clear = row }.tint(.red)
-                Button(unread ? "Mark read" : "Mark unread") {
-                    if unread { operate { try await mark(row.id, row.string("latest_id")) } }
-                    else {
-                        do { try app.save("chat.unreadPeers", unreadPeers + [row.id]) }
-                        catch { self.error = error.localizedDescription }
-                    }
-                }.tint(.blue)
-                Button(pinned ? "Unpin" : "Pin") {
-                    do {
-                        let remaining = pinnedPeers.filter { $0 != row.id }
-                        try app.save("chat.pinnedPeers", pinned ? remaining : [row.id] + remaining)
-                    } catch { self.error = error.localizedDescription }
-                }.tint(Color(red: 0.04, green: 0.42, blue: 0.41))
-            }
-            .buttonStyle(.automatic)
         }
         if loaded && error.isEmpty && filtered.isEmpty {
             if query.isEmpty {
@@ -510,6 +507,120 @@ private struct MessageListScreen: View {
     }
 }
 
+
+private struct ConversationSwipeRow<Card: View>: View {
+    let id: String
+    @Binding var revealed: String?
+    let pinned, unread: Bool
+    let open, pin, markRead, delete: () -> Void
+    @ViewBuilder var card: () -> Card
+    @GestureState private var drag: CGFloat = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private let trayWidth: CGFloat = 224
+    private var isOpen: Bool { revealed == id }
+    private var pinTitle: String { pinned ? "Unpin" : "Pin" }
+    private var readTitle: String { unread ? "Mark read" : "Mark unread" }
+
+    private func selectCard() {
+        if revealed != nil { revealed = nil } else { open() }
+    }
+
+    var body: some View {
+        let offset = max(-trayWidth, min(0, (isOpen ? -trayWidth : 0) + drag))
+        ZStack(alignment: .trailing) {
+            card()
+                .contentShape(Rectangle())
+                .onTapGesture(perform: selectCard)
+                .accessibilityElement(children: .combine)
+                .accessibilityAddTraits(.isButton)
+                .accessibilityAction { selectCard() }
+                .accessibilityIdentifier("conversation-" + id)
+                .accessibilityAction(named: Text(pinTitle)) { perform(pin) }
+                .accessibilityAction(named: Text(readTitle)) { perform(markRead) }
+                .accessibilityAction(named: Text("Delete")) { perform(delete) }
+                .accessibilityHidden(isOpen)
+                .offset(x: offset)
+            if offset < 0 {
+                Group {
+                    if #available(iOS 26, *) {
+                        GlassEffectContainer(spacing: 2) { actions }
+                    } else { actions }
+                }
+                .frame(width: trayWidth - 8)
+                .offset(x: trayWidth + offset)
+                .accessibilityHidden(!isOpen)
+            }
+        }
+        .clipped()
+        .contentShape(Rectangle())
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 16)
+                .updating($drag) { value, state, _ in
+                    if abs(value.translation.width) > abs(value.translation.height) { state = value.translation.width }
+                }
+                .onEnded { value in
+                    let dx = value.translation.width
+                    guard abs(dx) > abs(value.translation.height), abs(dx) > 18 else { return }
+                    if dx < -32 || value.predictedEndTranslation.width < -68 { revealed = id }
+                    else if dx > 32 || value.predictedEndTranslation.width > 68 { revealed = nil }
+                }
+        )
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: revealed)
+        .onDisappear { if isOpen { revealed = nil } }
+    }
+
+    private func perform(_ action: () -> Void) {
+        revealed = nil
+        action()
+    }
+
+    private var actions: some View {
+        HStack(spacing: 6) {
+            action(pinTitle, icon: pinned ? "pin.slash" : "pin", tint: .teal, ink: Color(red: 0.03, green: 0.31, blue: 0.32), handler: pin)
+            action(readTitle, icon: unread ? "envelope.open" : "envelope.badge", tint: .blue, ink: Color(red: 0.10, green: 0.25, blue: 0.46), handler: markRead)
+                .frame(minWidth: 84)
+            action("Delete", icon: "trash", tint: .pink, ink: Color(red: 0.51, green: 0.15, blue: 0.24), handler: delete)
+        }.padding(.vertical, 2)
+    }
+
+    private func action(_ title: String, icon: String, tint: Color, ink: Color, handler: @escaping () -> Void) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+        let label = VStack(spacing: 4) {
+            Image(systemName: icon).font(.system(size: 16, weight: .medium))
+            Text(title).font(.caption2.weight(.semibold)).lineLimit(2).multilineTextAlignment(.center)
+        }
+        .foregroundStyle(ink)
+        .frame(maxWidth: .infinity, minHeight: 54)
+        .contentShape(shape)
+        let illuminatedLabel = label.background {
+            shape.fill(LinearGradient(stops: [
+                .init(color: .white.opacity(0.68), location: 0),
+                .init(color: tint.opacity(0.06), location: 0.40),
+                .init(color: tint.opacity(0.20), location: 0.75),
+                .init(color: .white.opacity(0.32), location: 1)
+            ], startPoint: .topLeading, endPoint: .bottomTrailing))
+        }
+        return Button { perform(handler) } label: {
+            if #available(iOS 26, *) {
+                illuminatedLabel.glassEffect(.regular.tint(tint.opacity(0.07)).interactive(), in: shape)
+            } else {
+                illuminatedLabel.background(.ultraThinMaterial, in: shape)
+            }
+        }
+        .buttonStyle(.plain)
+        .overlay {
+            shape.strokeBorder(
+                LinearGradient(colors: [.white.opacity(0.95), .white.opacity(0.22), tint.opacity(0.25)],
+                               startPoint: .topLeading, endPoint: .bottomTrailing),
+                lineWidth: 1
+            )
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
+        .accessibilityLabel(title)
+    }
+}
 
 private struct InboxWelcomeCard: View {
     let findPeople: () -> Void

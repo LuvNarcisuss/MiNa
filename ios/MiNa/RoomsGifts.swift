@@ -83,6 +83,7 @@ struct RoomGifts: View {
     @ObservedObject var session: NativeRoomSession
     let initialRecipient: String?
     let close: () -> Void
+    let inviteFriend: () -> Void
     let openWallet: () throws -> Void
     @State private var index = 0
     @State private var recipient = ""
@@ -94,9 +95,12 @@ struct RoomGifts: View {
     @State private var cloudBalance: Int?
     @EnvironmentObject private var wallet: WalletStore
     private var inventory: [Int: Int] {
-        cloudInventory.merging(wallet.environment == .production ? (wallet.ledger?.inventory ?? [:]) : [:], uniquingKeysWith: +)
+        cloudInventory.merging(wallet.ledger?.inventory ?? [:], uniquingKeysWith: +)
     }
-    private var balance: Int? { cloudBalance.map { $0 + (wallet.environment == .production ? wallet.ledger?.balance ?? 0 : 0) } }
+    private var balance: Int? {
+        guard let cloudBalance, let local = wallet.ledger?.balance else { return nil }
+        return cloudBalance + local
+    }
     @State private var confirm = false
     @State private var busy = false
     @State private var sent = false
@@ -110,7 +114,25 @@ struct RoomGifts: View {
     func retain(_ op: String) throws {
         try app.save(key,["index":index,"recipient":recipient,"quantity":quantity,"backpack":backpack,"operation":op] as RoomRow)
     }
+    private var recipientMenu: some View {
+        PopupMenu("Recipient") {
+            ForEach(others, id: \.self) { uid in
+                PopupAction(session.name(uid), "person", selected: uid == recipient) { change($recipient, uid) }
+            }
+        } label: {
+            Label(others.contains(recipient) ? session.name(recipient) : "Select a recipient", systemImage: "person.2")
+                .frame(minHeight: 44)
+        }
+    }
+
     func change<T>(_ binding: Binding<T>,_ value: T) { binding.wrappedValue = value; operation = ""; confirm = false; error = "" }
+    private func updateRecipient() {
+        guard !busy, !sent, !others.contains(recipient) else { return }
+        confirm = false
+        // A saved operation can only be retried for its original recipient.
+        guard operation.isEmpty else { return }
+        recipient = others.count == 1 ? others[0] : ""
+    }
     var body: some View {
         RoomPanelList {
             if sent {
@@ -118,13 +140,6 @@ struct RoomGifts: View {
                 Text("\(quantity) × " + Self.names[index] + " sent to " + session.name(recipient) + ".")
                 Button("Done") { close() }.buttonStyle(RoomCapsuleStyle())
             } else {
-                if session.room?.roomFlag("allow_gifts") != true {
-                    Text("The host has turned off gift sending in this room.").font(.subheadline)
-                } else if !session.active {
-                    Text("Reconnect to the room to send a gift.").font(.subheadline)
-                } else if others.isEmpty {
-                    Text("You can send a gift when another listener joins.").font(.subheadline)
-                }
                 if !confirm {
                     Picker("Gift source",selection: Binding(get: { backpack },set: { value in
                         change($backpack,value); quantity = 1
@@ -135,9 +150,10 @@ struct RoomGifts: View {
                     RoomGiftCatalog(choices: choices,selected: index,price: { i in
                         backpack ? "\(inventory[i,default: 0]) owned" : prices[i].map { $0 == 0 ? "Free" : "\($0) coins" } ?? "Unavailable"
                     },select: { i in change($index,i); quantity = 1 })
-                    Picker("Recipient",selection: Binding(get: { recipient },set: { change($recipient,$0) })) {
-                        Text(others.isEmpty ? "No other participants" : "Select a recipient").tag("")
-                        ForEach(others,id: \.self) { Text(session.name($0)).tag($0) }
+                    if others.isEmpty {
+                        Label("No available recipients", systemImage: "person.2").foregroundStyle(.secondary)
+                    } else {
+                        recipientMenu
                     }
                     Stepper("Quantity: \(quantity)",value: Binding(get: { quantity },set: { change($quantity,$0) }),in: 1...max(1,limit))
                 } else {
@@ -155,7 +171,19 @@ struct RoomGifts: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if !sent {
                 Group {
-                    if let total, let balance, total > balance {
+                    if busy {
+                        Button("Sending…") {}.disabled(true)
+                    } else if !session.active {
+                        Button("Connecting…") {}.disabled(true)
+                    } else if session.room?.roomFlag("allow_gifts") != true {
+                        Button("Room gifts are off") {}.disabled(true)
+                    } else if others.isEmpty {
+                        Button("Invite a friend") {
+                            do { try retain(operation); inviteFriend() } catch { self.error = error.localizedDescription }
+                        }
+                    } else if !others.contains(recipient) {
+                        recipientMenu
+                    } else if let total, let balance, total > balance {
                         Button("Open wallet") { do { try retain(operation); try openWallet() } catch { self.error = error.localizedDescription } }
                     } else {
                         Button(confirm ? "Confirm and send" : "Review gift") {
@@ -166,6 +194,9 @@ struct RoomGifts: View {
                     .background(Color(red: 0.91, green: 0.99, blue: 0.99))
             }
         }
+        .onChange(of: others) { _ in updateRecipient() }
+        .onChange(of: busy) { if !$0 { updateRecipient() } }
+        .onChange(of: session.room?.roomFlag("allow_gifts")) { if $0 != true && !busy { confirm = false } }
         .minaAlert(error).interactiveDismissDisabled(busy).task(id: retry) {
             if retry == 0,let state = app.state(key) as? RoomRow {
                 index = min(max(0,state["index"] as? Int ?? 0),Self.names.count-1)
@@ -173,6 +204,7 @@ struct RoomGifts: View {
                 backpack = state.roomFlag("backpack"); operation = state.roomText("operation")
             }
             if retry == 0, let initialRecipient, operation.isEmpty { recipient = initialRecipient }
+            updateRecipient()
             do {
                 let me = app.api.userID
                 try await app.gifts.recover()

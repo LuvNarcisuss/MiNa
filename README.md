@@ -6,6 +6,10 @@ MiNa is an iPhone bedtime voice community built with SwiftUI. Rooms, Feed, AI Co
 
 Open `ios/MiNa.xcodeproj`, select the MiNa scheme and choose an iPhone running iOS 16.0 or later. Xcode resolves WebRTC 137.0.0 through Swift Package Manager for room audio and private calls. MiNa Companion uses the authenticated Supabase function `companion-chat`. Configure `GROQ_API_KEY` in Edge Function Secrets. The default Groq model is `openai/gpt-oss-20b`. Release signing and activation of the seven App Store products require the MiNa developer account. See [wallet configuration](docs/Wallet.md).
 
+## Upload a build to App Store Connect
+
+Run **MiNa iOS App Store** in Codemagic to archive the MiNa scheme with Xcode 26.5 and upload the signed IPA using the `MiNa` integration. The workflow requires an App Store distribution certificate and a matching provisioning profile for `com.mina.bedtime`. After Apple processes the upload, the build appears under TestFlight for app `6839543175`. Review submission is manual. Use **MiNa signing validation** for a signing-only build.
+
 ## Create a sign-in account
 
 In the app, select **Create account**, enter your email and your password twice, and accept the terms. When the account creation alert appears, tap **OK** to return to sign-in. Your email stays filled in. Enter your password to sign in.
@@ -16,5 +20,5 @@ Administrators can also provision an account. Open the [company MiNa user list](
 
 - `ios/MiNa` contains Swift screens, audio and media handling, the authenticated service client and account storage.
 - `ios/MiNa/Artwork` holds design sources for the cloud artwork release. The iPhone downloads interface artwork and soundscapes from Supabase Storage. See [artwork provenance](docs/Artwork.md).
-- `supabase/migrations` defines database access and transactions. The Edge Functions in `supabase/functions` include policies, account deletion and live gift authorization. The iPhone verifies and credits StoreKit purchases locally.
+- `supabase/migrations` defines database access and transactions. The Edge Functions in `supabase/functions` include policies, account deletion and AI chat. The database handles room gift delivery. The iPhone verifies and credits StoreKit purchases locally.
 - [Product design](docs/MiNa-Product-Design.md) describes the approved journeys and source boards. [Delivery record](docs/Delivery.md) distinguishes current checks from earlier acceptance runs.

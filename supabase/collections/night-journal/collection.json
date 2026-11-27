@@ -200,6 +200,7 @@
   "rooms": [
     {
       "key": "last-stop",
+      "members": ["ivy", "june", "thea"],
       "host": "ivy",
       "title": "The Last Stop",
       "topic": "Night Journal · Leave a line about the quietest part of your day.",
@@ -221,6 +222,7 @@
     },
     {
       "key": "shore",
+      "members": ["bea", "clea", "iris"],
       "host": "bea",
       "title": "Low Tide Letters",
       "topic": "Night Journal · A place to trade little notes from the shore.",
@@ -242,6 +244,7 @@
     },
     {
       "key": "window",
+      "members": ["wren", "nell"],
       "host": "wren",
       "title": "The Humming Window",
       "topic": "Night Journal · Share a tune, a rain sound or a bedtime ritual.",

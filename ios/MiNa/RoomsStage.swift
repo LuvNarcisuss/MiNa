@@ -7,28 +7,17 @@ enum RoomPanel: String, Identifiable {
 }
 
 struct RoomCapsuleStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label.font(.subheadline.bold()).foregroundColor(Color(red: 0.025,green: 0.18,blue: 0.19))
             .frame(maxWidth: .infinity,minHeight: 46)
             .background(LinearGradient(colors: [.mint, Color(red: 0.31,green: 0.74,blue: 1)],startPoint: .leading,endPoint: .trailing),in: Capsule())
-            .opacity(configuration.isPressed ? 0.75 : 1)
+            .opacity(isEnabled ? (configuration.isPressed ? 0.75 : 1) : 0.45)
     }
 }
 
 extension RoomPanel {
-    var artwork: String {
-        switch self {
-        case .host: return "host"
-        case .listener: return "listener"
-        case .audience,.chat: return "audience"
-        case .mic: return "queue"
-        case .gift: return "gift"
-        case .music: return "music"
-        case .share: return "share"
-        case .exit: return "exit"
-        case .ranking: return "rank"
-        }
-    }
     var fraction: CGFloat {
         switch self {
         case .exit: return 0.35
@@ -44,7 +33,7 @@ private struct RoomPanelOutline: Shape {
     let drawer: Bool
     func path(in rect: CGRect) -> Path {
         if drawer { return Path(rect) }
-        return Path(UIBezierPath(roundedRect: rect,byRoundingCorners: [.topLeft,.topRight],cornerRadii: CGSize(width: 22,height: 22)).cgPath)
+        return Path(UIBezierPath(roundedRect: rect,byRoundingCorners: [.topLeft,.topRight],cornerRadii: CGSize(width: PopupTheme.radius, height: PopupTheme.radius)).cgPath)
     }
 }
 
@@ -64,17 +53,8 @@ extension View {
                     ZStack(alignment: item == .music ? .trailing : .bottom) {
                         Color.black.opacity(0.46).ignoresSafeArea().onTapGesture { selection.wrappedValue = nil }.accessibilityHidden(true)
                         VStack(alignment: .leading,spacing: 0) {
-                            HStack {
-                                if item == .music {
-                                    Button { selection.wrappedValue = nil } label: { NativeArt("music",2).scaledToFit().frame(width: 27,height: 27) }.frame(width: 44,height: 44).accessibilityLabel("Close")
-                                }
-                                Text(item.rawValue).font(.system(size: 19,weight: .heavy,design: .rounded))
-                                    .foregroundColor(Color(red: 0.06,green: 0.27,blue: 0.23))
-                                Spacer()
-                                if item != .music {
-                                    Button { selection.wrappedValue = nil } label: { NativeArt(item == .ranking ? "host" : item.artwork,item == .exit ? 2 : 3).scaledToFit().frame(width: 22,height: 22).frame(width: 44,height: 44) }.accessibilityLabel("Close")
-                                }
-                            }.padding(.horizontal,14).padding(.top,6)
+                            PopupHeading(title: item.rawValue, closeLabel: "Close") { selection.wrappedValue = nil }
+                                .padding(.leading, 20).padding(.trailing, 12).padding(.top, 10)
                             content(item).frame(maxWidth: .infinity,maxHeight: .infinity,alignment: .topLeading)
                         }
                         .frame(width: item == .music ? geo.size.width * 0.78 : geo.size.width,height: geo.size.height * item.fraction)
@@ -83,10 +63,7 @@ extension View {
                             GeometryReader { bounds in
                                 let top = item == .music ? topInset : 0
                                 let bottom = bottomInset + giftBottomInset
-                                ZStack {
-                                    Color(red: 0.91,green: 0.99,blue: 0.99)
-                                    NativeArt(item == .ranking ? "audience" : item.artwork,1)
-                                }
+                                PopupTheme.surface
                                 .frame(width: bounds.size.width,height: bounds.size.height + top + bottom)
                                 .clipShape(RoomPanelOutline(drawer: item == .music))
                                 .offset(y: -top)
@@ -160,6 +137,22 @@ struct RoomStageFrame<Bottom: View>: View {
                 .background(index >= 15 ? Color.clear : .white.opacity(0.2),in: Capsule()).frame(minWidth: 44,minHeight: 44)
         }.accessibilityLabel(label)
     }
+    private func participantButton(_ person: RoomParticipant, compact: Bool) -> some View {
+        Button { selectParticipant?(person.id) } label: {
+            VStack(spacing: 3) {
+                ZStack {
+                    Circle().fill(.white.opacity(0.18))
+                    Text(String(person.name.prefix(1))).bold()
+                    if let url = person.portrait {
+                        CloudPortraitImage(url: url) { $0.resizable().scaledToFill() } placeholder: { Color.clear }
+                    }
+                }.frame(width: compact ? 28 : 34, height: compact ? 28 : 34).clipShape(Circle())
+                Text(person.name).font(.caption.bold()).lineLimit(1)
+                Text(person.role).font(.caption2).lineLimit(1).minimumScaleFactor(0.8).foregroundStyle(.white.opacity(0.82))
+            }.frame(width: 74)
+        }.buttonStyle(.plain).accessibilityLabel(person.name + ", " + person.role)
+    }
+
     var body: some View {
         GeometryReader { geo in
             let compact = geo.size.height < 680
@@ -175,7 +168,9 @@ struct RoomStageFrame<Bottom: View>: View {
                         }
                     }
                     Spacer(minLength: 0)
-                    Button { open(.audience,1) } label: { HStack(spacing: 2) { NativeArt("room",3).frame(width: 13,height: 13); if let audience { Text("\(audience)").font(.caption) } }.padding(6).background(.white.opacity(0.2),in: Capsule()).frame(minWidth: 44,minHeight: 44) }.accessibilityLabel("Room audience")
+                    Button { open(.audience,1) } label: { HStack(spacing: 2) { NativeArt("room",3).frame(width: 13,height: 13); if let audience { Text("\(audience)").font(.caption) } }.padding(6).background(.white.opacity(0.2),in: Capsule()).frame(minWidth: 44,minHeight: 44) }
+                        .accessibilityLabel("Room audience")
+                        .accessibilityValue(audience.map(roomAudienceLabel) ?? "")
                     tool("Invite friends",2,.share); tool("Leave room",1,.exit)
                 }
                 HStack { NativeArt("room",4).frame(width: 18,height: 18); Text(topic).font(.caption).lineLimit(1); Spacer() }
@@ -195,24 +190,20 @@ struct RoomStageFrame<Bottom: View>: View {
                     }.frame(maxWidth: .infinity)
                 }
                 if !participants.isEmpty {
-                    Text("Listeners & contributors").font(.subheadline.bold())
-                    HStack(alignment: .top, spacing: 4) {
-                        ForEach(participants.prefix(4)) { person in
-                            Button { selectParticipant?(person.id) } label: {
-                                VStack(spacing: 3) {
-                                    ZStack {
-                                        Circle().fill(.white.opacity(0.18))
-                                        Text(String(person.name.prefix(1))).bold()
-                                        if let url = person.portrait {
-                                            CloudPortraitImage(url: url) { $0.resizable().scaledToFill() } placeholder: { Color.clear }
-                                        }
-                                    }.frame(width: compact ? 28 : 34, height: compact ? 28 : 34).clipShape(Circle())
-                                    Text(person.name).font(.caption.bold()).lineLimit(1)
-                                    Text(person.role).font(.caption2).lineLimit(1).minimumScaleFactor(0.8).foregroundStyle(.white.opacity(0.82))
-                                }.frame(maxWidth: .infinity)
-                            }.buttonStyle(.plain).accessibilityLabel(person.name + ", " + person.role)
+                    HStack {
+                        Text("Room members").font(.subheadline.bold())
+                        if participants.count > 4 {
+                            Spacer()
+                            Button("See all \(participants.count)") { open(.audience, 1) }.font(.footnote)
                         }
                     }
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(alignment: .top, spacing: 4) {
+                            ForEach(participants.prefix(4)) { person in
+                                participantButton(person, compact: compact)
+                            }
+                        }
+                    }.fixedSize(horizontal: false, vertical: true)
                 }
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible()),count: 4),spacing: spacing) {
                     ForEach(1...8,id: \.self) { seat in
@@ -298,7 +289,7 @@ struct RoomLocalStage: View {
                             Stepper("Quantity: \(quantity)",value: $quantity,in: 1...99)
                             Text("No live recipient · Price unavailable")
                             Button("Open wallet") { panel = nil; app.go("wallet") }
-                        case .exit: Text(draft == nil ? "Audio will stop when you leave." : "Your draft will stay on this device."); Button("Leave room") { player.stop(); panel = nil; app.go("rooms") }.buttonStyle(RoomCapsuleStyle())
+                        case .exit: Text(draft == nil ? "Audio will stop when you leave." : "Your draft will stay on this device."); PopupAction("Leave room", "rectangle.portrait.and.arrow.right", role: .destructive) { player.stop(); panel = nil; app.go("rooms") }
                             Button("Keep listening") { panel = nil }.frame(maxWidth: .infinity,minHeight: 44)
                         case .ranking,.listener: EmptyView()
                         }

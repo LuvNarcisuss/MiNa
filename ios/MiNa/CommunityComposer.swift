@@ -90,7 +90,7 @@ struct CommunityComposer: View {
                             try save(next); clean(media)
                         } } label: { NativeArt("compose",4).scaledToFit().frame(width:22,height:22).frame(width:44,height:44) }.accessibilityLabel("Remove video")
                     } else {
-                        Button { work { try await pick() } } label: {
+                        MediaSourceMenu(title: "Choose a video", choose: { source in work { try await pick(from: source) } }) {
                             VStack(spacing:6) {
                                 NativeArt("compose",3).scaledToFit().frame(width:152,height:112)
                                 Text("Choose a video").font(.subheadline).foregroundStyle(.secondary)
@@ -214,9 +214,9 @@ struct CommunityComposer: View {
             Task { try? await app.discardUnusedCapture(path) }
         }
     }
-    private func pick() async throws {
+    private func pick(from source: DeviceMedia.Source) async throws {
         status = "Importing video…"
-        let result = try await app.pick("video")
+        let result = try await app.pick("video", from: source)
         if result["cancelled"] as? Bool == true { return }
         guard let id = result["id"] as? String, result.communitySeconds("duration") > 0 else { throw MiNaIssue("Choose a playable video.") }
         let previous = media

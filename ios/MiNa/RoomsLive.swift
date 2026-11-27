@@ -16,6 +16,7 @@ struct RoomLiveView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var previewOffset = 0
     @State private var moderation: RoomModerationTarget?
+    @State private var reportedRoom = false
     @State private var panel: RoomPanel?
     @State private var seat = 1
     @State private var listenerID = ""
@@ -37,7 +38,7 @@ struct RoomLiveView: View {
                 let members = session.members.filter { $0["seat"] is Int }
                 let seats = members.reduce(into: [Int:String]()) { result,row in if let n = row["seat"] as? Int { result[n] = session.name(row.roomText("user_id")) } }
                 let portraits = members.reduce(into: [Int:URL]()) { result,row in if let n = row["seat"] as? Int { result[n] = session.pictures[row.roomText("user_id")] } }
-                RoomStageFrame(title: room.roomText("title"),topic: room.roomText("topic"),cover: room.roomText("cover"),host: session.name(hostID),hostStatus: seats[0] == nil ? "Host away" : "Host",audience: session.active ? session.members.count : nil,runtime: max(0,Int(-(roomDate(room.roomText("created_at")) ?? Date()).timeIntervalSinceNow / 60)),seats: seats,hostPortrait: session.pictures[hostID],portraits: portraits,safetyMenu: AnyView(safetyMenu),participants: session.participants,selectParticipant: showListener,open: { next,n in seat = n; listenerID = ""; panel = next }) {
+                RoomStageFrame(title: room.roomText("title"),topic: room.roomText("topic"),cover: room.roomText("cover"),host: session.name(hostID),hostStatus: seats[0] == nil ? "Room host" : "Host",audience: session.active ? session.audience.count : nil,runtime: max(0,Int(-(roomDate(room.roomText("created_at")) ?? Date()).timeIntervalSinceNow / 60)),seats: seats,hostPortrait: session.pictures[hostID],portraits: portraits,safetyMenu: AnyView(safetyMenu),participants: session.participants.filter { $0.group == .present },selectParticipant: showListener,open: { next,n in seat = n; listenerID = ""; panel = next }) {
                     stageChat
                 }
             } else { VStack(spacing: 16) { if session.status != "This room has ended or is private." { Text(session.status) }; if session.status == "Reconnecting…" { Button("Retry") { session.leave(app.api,id); retry += 1 } }; Button("Back to rooms") { app.go("rooms") } } }
@@ -71,7 +72,7 @@ struct RoomLiveView: View {
                 Group {
                     switch next {
                     case .ranking: RoomRankings(room: id)
-                    case .gift: RoomGifts(id: id,session: session,initialRecipient: listenerID.isEmpty ? nil : listenerID,close: { panel = nil },openWallet: {
+                    case .gift: RoomGifts(id: id,session: session,initialRecipient: listenerID.isEmpty ? nil : listenerID,close: { panel = nil },inviteFriend: { panel = .share },openWallet: {
                         try app.save(resumeKey,Date().timeIntervalSince1970); panel = nil; app.go("wallet")
                     })
                     case .share: RoomInvitations(id: id)
@@ -82,22 +83,30 @@ struct RoomLiveView: View {
                     }
                 }
         }
-        .sheet(item: $moderation) { target in
-            RoomModerationForm(target: target) { message in
-                moderation = nil
-                if target.block || target.kind == "room" {
+        .sheet(item: $moderation, onDismiss: {
+            if reportedRoom {
+                reportedRoom = false
+                session.leave(app.api, id)
+                if app.route == NativeRoute(name: "rooms.live", id: id) { app.back() }
+            }
+        }) { target in
+            if target.block {
+                RoomBlockForm(target: target) {
+                    moderation = nil
                     session.leave(app.api, id)
-                    if !target.block { app.safetyChanged(); app.back(); app.safetyNotice = message }
-                } else {
+                }
+            } else {
+                ReportForm(targetID: target.uid, kind: target.kind, targetName: target.name) {
                     panel = nil
-                    session.notice = message
+                    reportedRoom = target.kind == "room"
+                    app.safetyChanged()
                 }
             }
         }
     }
     private var safetyMenu: some View {
-        Menu {
-            Button("Report room") { moderation = .init(uid: id, name: session.room?.roomText("title") ?? "Room", kind: "room") }
+        PopupMenu("Room options") {
+            PopupAction("Report room", "flag") { moderation = .init(uid: id, name: session.room?.roomText("title") ?? "Room", kind: "room") }
             if hostID != me && !hostID.isEmpty { personActions(hostID, label: "host") }
         } label: {
             Label("Report / Block", systemImage: "shield").font(.caption.bold())
@@ -107,8 +116,8 @@ struct RoomLiveView: View {
     }
 
     @ViewBuilder private func personActions(_ uid: String, label: String) -> some View {
-        Button("Report " + label) { moderation = .init(uid: uid, name: session.name(uid), kind: "profile") }
-        Button("Block " + label, role: .destructive) { moderation = .init(uid: uid, name: session.name(uid), kind: "profile", block: true) }
+        PopupAction("Report " + label, "person.crop.circle.badge.exclamationmark") { moderation = .init(uid: uid, name: session.name(uid), kind: "profile") }
+        PopupAction("Block " + label, "person.crop.circle.badge.minus", role: .destructive) { moderation = .init(uid: uid, name: session.name(uid), kind: "profile", block: true) }
     }
 
     private var stageChat: some View {
@@ -201,7 +210,7 @@ struct RoomLiveView: View {
                 else { RoomArtwork(session.room?.roomText("cover") ?? "moon-seat").scaledToFill().frame(width: 48,height: 48).clipShape(Circle()) }
                 VStack(alignment: .leading) { Text(session.name(hostID)).bold(); Text("Room host").font(.caption) }
             }
-            VStack(alignment: .leading,spacing: 8) { Text(session.room?.roomText("title") ?? "Room").bold(); Text(session.room?.roomText("topic") ?? ""); Text("Audience: \(session.members.count)") }.frame(maxWidth: .infinity,alignment: .leading).padding().background(.white.opacity(0.85),in: RoundedRectangle(cornerRadius: 14))
+            VStack(alignment: .leading,spacing: 8) { Text(session.room?.roomText("title") ?? "Room").bold(); Text(session.room?.roomText("topic") ?? ""); if session.active { Text(roomAudienceLabel(session.audience.count) + " · " + roomOnlineLabel(session.members.count)) } }.frame(maxWidth: .infinity,alignment: .leading).padding().background(.white.opacity(0.85),in: RoundedRectangle(cornerRadius: 14))
             if !session.host { personActions(hostID, label: "host") }
             Button("View host profile") { panel = nil; app.go(session.host ? "profile" : "person",hostID) }.buttonStyle(RoomCapsuleStyle())
             if !session.host,session.room?.roomFlag("allow_follow") == true {
@@ -215,9 +224,9 @@ struct RoomLiveView: View {
                 } }.disabled(busy)
             }
         case .audience:
-            ForEach([true, false], id: \.self) { present in
-                let people = session.participants.filter { $0.present == present }
-                if !people.isEmpty { Text(present ? "Here now" : "Earlier contributors").font(.headline) }
+            ForEach(RoomParticipant.Group.allCases, id: \.self) { group in
+                let people = session.participants.filter { $0.group == group }
+                if !people.isEmpty { Text(group.rawValue).font(.headline) }
                 ForEach(people) { person in
                     Button { showListener(person.id) } label: {
                         HStack(spacing: 9) {
@@ -226,7 +235,7 @@ struct RoomLiveView: View {
                             Spacer(); Text("›")
                         }.padding(10).background(.white.opacity(0.86), in: RoundedRectangle(cornerRadius: 13))
                     }.buttonStyle(.plain)
-                    if present, session.host, person.id != me,
+                    if group == .present, session.host, person.id != me,
                        session.members.contains(where: { $0.roomText("user_id") == person.id && $0["seat"] is Int }) {
                         Button("Remove from mic") { act { try await updateMember(person.id, ["seat": NSNull()]) } }.disabled(busy)
                     }
@@ -234,7 +243,9 @@ struct RoomLiveView: View {
             }
         case .listener:
             HStack { memberPortrait(listenerID); Text(session.name(listenerID)).font(.headline) }
-            Text(session.members.contains(where: { $0.roomText("user_id") == listenerID }) ? "In this room" : "Earlier contributor")
+            if let person = session.participants.first(where: { $0.id == listenerID }) {
+                Text(person.group == .present ? "In this room" : person.role)
+            }
             if listenerID != me { personActions(listenerID, label: "listener") }
             Button("View profile") { panel = nil; app.go(listenerID == me ? "profile" : "person",listenerID) }.buttonStyle(RoomCapsuleStyle())
             if listenerID != me, session.members.contains(where: { $0.roomText("user_id") == listenerID }), session.room?.roomFlag("allow_gifts") == true {
@@ -253,7 +264,7 @@ struct RoomLiveView: View {
                         let body: RoomRow = ["music_track":stop ? NSNull() as Any : sound.id,"music_started_at":stop ? NSNull() as Any : roomStamp(Date())]
                         let result = try await app.api.rest("rooms?id=eq." + id + "&host_id=eq." + me + "&closed=eq.false",method: "PATCH",body: body,prefer: "return=representation") as? [RoomRow]
                         guard let room = result?.first else { throw MiNaIssue("Room music could not be updated.") }
-                        session.room = room; listen = !stop
+                        session.room?.merge(room) { _, new in new }; listen = !stop
                     } else { try await send("mina:music:" + sound.id); session.notice = "Requested " + sound.title + "." }
                 } }.disabled(busy || !session.active || (!session.host && session.room?.roomFlag("allow_comments") != true))
             }
@@ -266,14 +277,22 @@ struct RoomLiveView: View {
             } else { Text("Comments are off in this room.") }
         case .exit:
             Text(session.host ? "Ending the room disconnects every participant and closes its chat." : "Your microphone and room audio will disconnect.")
-            Button(session.host ? "End room for everyone" : "Leave room",role: .destructive) { act {
+            PopupAction(session.host ? "End room for everyone" : "Leave room", "rectangle.portrait.and.arrow.right", role: .destructive) { act {
                 if session.host {
                     let rows = try await app.api.rest("rooms?id=eq." + id + "&host_id=eq." + me,method: "PATCH",body: ["closed":true],prefer: "return=representation") as? [RoomRow]
                     guard rows?.first != nil else { throw MiNaIssue("Could not end this room.") }
+                    session.leave(app.api, id)
+                } else {
+                    do {
+                        try await session.leave(app.api, id)?.value
+                    } catch {
+                        retry += 1
+                        throw MiNaIssue("Leaving the room could not be confirmed. Please try again.")
+                    }
                 }
-                session.leave(app.api,id); player.stop(); panel = nil; app.go("rooms")
-            } }.buttonStyle(RoomCapsuleStyle()).disabled(busy)
-            Button("Stay in room") { panel = nil }
+                player.stop(); panel = nil; app.go("rooms")
+            } }.disabled(busy)
+            PopupAction("Stay in room", "arrow.uturn.backward") { panel = nil }
         default: EmptyView()
         }
     }
@@ -333,39 +352,20 @@ private struct RoomModerationTarget: Identifiable {
     var block = false
 }
 
-private struct RoomModerationForm: View {
+private struct RoomBlockForm: View {
     @EnvironmentObject private var app: MiNaAppModel
     @Environment(\.dismiss) private var dismiss
     let target: RoomModerationTarget
-    let completed: (String) -> Void
-    @State private var reason = "Harassment"
-    @State private var details = ""
+    let completed: () -> Void
     @State private var busy = false
     @State private var error = ""
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    Text(target.name).bold()
-                    if target.block {
-                        Text("Their messages will be hidden. You can unblock this person in your profile settings.")
-                    } else {
-                        Picker("Reason", selection: $reason) {
-                            ForEach(["Harassment", "Sexual content", "Harmful content", "Privacy concern", "Spam", "Other"], id: \.self) { Text($0) }
-                        }
-                        TextField("Additional details (optional)", text: $details, axis: .vertical)
-                    }
-                }
-                Button(target.block ? "Confirm block" : "Submit report", role: target.block ? .destructive : nil) {
-                    Task { await submit() }
-                }
-            }
-            .navigationTitle(target.block ? "Block listener?" : "Report " + target.kind)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
-            .disabled(busy)
-        }.minaAlert(error).interactiveDismissDisabled(busy).presentationDetents([.medium, .large])
+        PopupPanel(title: "Block listener?", message: target.name, close: { dismiss() }) {
+            Text("Their messages will be hidden. You can unblock this person in your profile settings.")
+                .font(.subheadline).foregroundStyle(PopupTheme.ink)
+            PopupAction("Confirm block", "person.crop.circle.badge.minus", role: .destructive) { Task { await submit() } }
+        }.disabled(busy).modifier(FittedPopup()).minaAlert(error).interactiveDismissDisabled(busy)
     }
 
     @MainActor private func submit() async {
@@ -373,13 +373,8 @@ private struct RoomModerationForm: View {
         busy = true
         defer { busy = false }
         do {
-            if target.block {
-                try await app.blockMember(target.uid, name: target.name)
-                completed("Listener blocked.")
-            } else {
-                let receipt = try await app.api.report(target.uid, kind: target.kind, reason: reason, details: details, operation: target.id)
-                completed("Report received · " + receipt.prefix(8))
-            }
+            try await app.blockMember(target.uid, name: target.name)
+            completed()
         } catch { self.error = error.localizedDescription }
     }
 }

@@ -3,16 +3,21 @@ import SwiftUI
 import AVFoundation
 
 struct RoomParticipant: Identifiable {
+    enum Group: String, CaseIterable {
+        case present = "Room members"
+        case earlier = "Earlier contributors"
+    }
     let id: String
     let name: String
     let portrait: URL?
-    let present: Bool
+    let group: Group
     let role: String
 }
 
 @MainActor final class NativeRoomSession: ObservableObject {
     @Published var room: RoomRow?
-    @Published var members: [RoomRow] = []
+    @Published private(set) var audience: [RoomRow] = []
+    var members: [RoomRow] { audience.filter { $0.roomFlag("connected") } }
     @Published var messages: [RoomRow] = []
     @Published var requests: [RoomRow] = []
     @Published var profiles: [String:String] = [:]
@@ -49,16 +54,18 @@ struct RoomParticipant: Identifiable {
     var participants: [RoomParticipant] {
         var seen = Set<String>()
         var people: [RoomParticipant] = []
-        func append(_ uid: String, present: Bool, role: String) {
+        func append(_ uid: String, group: RoomParticipant.Group, role: String) {
             guard !uid.isEmpty, seen.insert(uid).inserted else { return }
-            people.append(RoomParticipant(id: uid, name: name(uid), portrait: pictures[uid], present: present, role: role))
+            people.append(RoomParticipant(id: uid, name: name(uid), portrait: pictures[uid], group: group, role: role))
         }
-        for member in members {
+        for member in audience {
             let seat = member["seat"] as? Int
-            append(member.roomText("user_id"), present: true, role: seat.map { $0 == 0 ? "Host" : "Mic \($0)" } ?? "Listening")
+            let id = member.roomText("user_id")
+            let role = id == room?.roomText("host_id") ? "Host" : seat.map { "Mic \($0)" } ?? "Member"
+            append(id, group: .present, role: id == me ? "You · " + role : role)
         }
         for message in messages.reversed() {
-            append(message.roomText("owner_id"), present: false, role: "Chatted earlier")
+            append(message.roomText("owner_id"), group: .earlier, role: "Chatted earlier")
         }
         return people
     }
@@ -78,13 +85,15 @@ struct RoomParticipant: Identifiable {
         profileWork?.cancel(); profileWork = nil
         mic = "Off"
         peers.values.forEach { $0.link.microphone(false); $0.link.close() }
-        peers.removeAll(); connections = 0; active = false; members = []; requests = []
+        peers.removeAll(); connections = 0; active = false; audience = []; requests = []
     }
-    func leave(_ api: MiNaAPI,_ id: String) {
+    @discardableResult func leave(_ api: MiNaAPI,_ id: String) -> Task<Void, Error>? {
         epoch = UUID()
         disconnect()
-        if !joined.isEmpty { let path = membership(id,joined); Task { _ = try? await api.rest(path,method: "DELETE") } }
+        let path = joined.isEmpty ? nil : membership(id, joined)
         joined = ""; cursor = 0; pendingSignals.removeAll(); confirmed = .distantPast
+        guard let path else { return nil }
+        return Task { _ = try await api.rest(path, method: "DELETE") }
     }
     func watchdog() {
         if active && -confirmed.timeIntervalSinceNow > 30 { disconnect(); status = "Reconnecting…" }
@@ -123,14 +132,15 @@ struct RoomParticipant: Identifiable {
                     guard rows?.first != nil else { joined = ""; throw MiNaIssue("Membership expired.") }
                     lastBeat = Date()
                 }
-                async let roster = api.rows("room_members?" + filter + "&last_seen=gte." + roomFilter(roomStamp(Date().addingTimeInterval(-60))) + "&order=joined_at.asc")
+                async let roster = api.roomAudience(id)
                 async let chat = api.rows("room_messages?" + filter + "&order=created_at.desc,id.desc&limit=45")
                 async let queue = api.rows("room_seat_requests?" + filter + "&order=created_at.asc")
                 async let signals = api.rows("room_signals?" + filter + "&recipient_id=eq." + me + "&id=gt.\(cursor)&created_at=gte." + roomFilter(joined) + "&order=id.asc&limit=100")
-                let (present,history,waiting,incoming) = try await (roster,chat,queue,signals)
+                let (people,history,waiting,incoming) = try await (roster,chat,queue,signals)
+                let present = people.filter { $0.roomFlag("connected") }
                 try check(generation)
                 guard present.contains(where: { $0.roomText("user_id") == me && $0.roomText("joined_at") == joined }) else { joined = ""; throw MiNaIssue("Membership expired.") }
-                members = present; messages = Array(history.reversed()); requests = waiting
+                audience = people; messages = Array(history.reversed()); requests = waiting
                 if mySeat == nil { setMic("Off") }
                 for (uid,peer) in peers {
                     let member = present.first { $0.roomText("user_id") == uid && $0.roomText("joined_at") == peer.session }
@@ -141,7 +151,7 @@ struct RoomParticipant: Identifiable {
                     }
                 }
                 active = true; status = "In room"; confirmed = Date()
-                let ids = Set(present.map { $0.roomText("user_id") } + history.map { $0.roomText("owner_id") } + [current.roomText("host_id")])
+                let ids = Set(people.map { $0.roomText("user_id") } + history.map { $0.roomText("owner_id") } + [current.roomText("host_id")])
                 if profileWork == nil && (-lastProfiles.timeIntervalSinceNow > 480 || !ids.isSubset(of: Set(profiles.keys))) {
                     let token = audioGeneration
                     profileWork = Task {

@@ -210,6 +210,14 @@ final class MiNaAPI {
         return result
     }
 
+    func roomAudience(_ roomID: String) async throws -> [[String: Any]] {
+        let response = try await rest("rpc/room_audience_roster", method: "POST", body: ["target": roomID])
+        guard let members = response as? [[String: Any]] else {
+            throw MiNaIssue("The room audience could not be loaded. Please try again.")
+        }
+        return members
+    }
+
     func rows(_ path: String) async throws -> [[String: Any]] {
         guard let result = try await rest(path) as? [[String: Any]] else { throw MiNaIssue("The records could not be read.") }
         return result

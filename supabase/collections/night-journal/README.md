@@ -1,6 +1,6 @@
 # Night Journal
 
-Night Journal is an editorial collection for MiNa's rooms, Dream Square and video feed. Each illustrated identity is a fictional character. Each profile discloses that role in its bio and uses a different stock photograph. Public chat, comments, likes and follows in this collection connect only the listed characters. The rooms use the existing MiNa tracks for optional listening. A host can be away. Room presence and microphone seats still come from connected clients.
+Night Journal is an editorial collection for MiNa's rooms, Dream Square and video feed. Each illustrated identity is a fictional character. Each profile discloses that role in its bio and uses a different stock photograph. Public chat, comments, likes and follows in this collection connect only the listed characters. The rooms use the existing MiNa tracks for optional listening. A host can be away. Each character belongs to one room. Room member totals include assignments and connected listeners, with each account counted once. Online counts and microphone seats use active connections.
 
 ## Media and sources
 

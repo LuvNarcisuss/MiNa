@@ -19,6 +19,8 @@
 		F88EA6F2E4EBA62D396A057D /* MiNaRoot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97DA47A0B9CC1BAFBB1F3D64 /* MiNaRoot.swift */; };
 		782E0915B3414D9BA18529DD /* CloudInterface.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31FFEBE3A6144EEF96DA5EA2 /* CloudInterface.swift */; };
 		45DCE40DEF664E28B84DAFA1 /* AppAlerts.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1B637BE2AEB49DE8FB659A1 /* AppAlerts.swift */; };
+		D93B14015E0144AC9BE15401 /* PopupPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D93B14015E0144AC9BE15402 /* PopupPanel.swift */; };
+		2DE2CC5BC5054B7F901BD21A /* ReportForm.swift in Sources */ = {isa = PBXBuildFile; fileRef = 421A588F6D9C46469747178E /* ReportForm.swift */; };
 		FC1BBB123923FC2F40C3FE4B /* MiNaAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5671C53F172EC40CF6C3FEC2 /* MiNaAPI.swift */; };
 		AC53D7D9239FBDA7D413A624 /* Messages.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CCDD6CDDD2B1CAB201C779C /* Messages.swift */; };
 		E3909ECD9DB8400E9CB5EA46 /* WalletScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDF300E6C61F4802B87C343D /* WalletScreen.swift */; };
@@ -27,6 +29,7 @@
 		63845AB99F094516AD2C1686 /* DeviceWallet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4ABAF6EFB4854A1DB05CD965 /* DeviceWallet.swift */; };
 		CA786547D36266521FCC2858 /* EconomyScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8A12EBB70FAEF6B443C4D65 /* EconomyScreen.swift */; };
 		BF1FC0DDA316B6BF99D1ED3B /* CompanionScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8C055548A4207B3E3A3E490 /* CompanionScreen.swift */; };
+		9B872900CC8441A494D4984F /* DiscoveryRefresh.swift in Sources */ = {isa = PBXBuildFile; fileRef = A17A6C45078442B485C1A32F /* DiscoveryRefresh.swift */; };
 		F617D1E553BCB108AD118AB8 /* CommunityScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12EA8853DD82A9C8C909CED5 /* CommunityScreen.swift */; };
 		72384FB7DBF09E17695A91D4 /* CommunityMedia.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0225FE17DF8FF49B1E5E981 /* CommunityMedia.swift */; };
 		D919B963D12037CEEC673D29 /* CommunityComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63B84050CBA7206F1297506E /* CommunityComposer.swift */; };
@@ -46,7 +49,6 @@
 
 /* Begin PBXFileReference section */
 		F67DAD14D3514608A9BC3A13 /* MiNaCoins.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = MiNaCoins.storekit; sourceTree = "<group>"; };
-		E2EAFEB991DB48A1B2276A32 /* MiNa.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MiNa.entitlements; sourceTree = "<group>"; };
 		BB0D2C6EF97E2832A52EA001 /* VoicePeer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoicePeer.swift; sourceTree = "<group>"; };
 		0225C7CAACFDCE07BABDD1BA /* VoiceCall.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceCall.swift; sourceTree = "<group>"; };
 		89915821925F4C6B9D76A221 /* CallPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallPreview.swift; sourceTree = "<group>"; };
@@ -59,6 +61,8 @@
 		97DA47A0B9CC1BAFBB1F3D64 /* MiNaRoot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiNaRoot.swift; sourceTree = "<group>"; };
 		31FFEBE3A6144EEF96DA5EA2 /* CloudInterface.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudInterface.swift; sourceTree = "<group>"; };
 		E1B637BE2AEB49DE8FB659A1 /* AppAlerts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppAlerts.swift; sourceTree = "<group>"; };
+		D93B14015E0144AC9BE15402 /* PopupPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopupPanel.swift; sourceTree = "<group>"; };
+		421A588F6D9C46469747178E /* ReportForm.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportForm.swift; sourceTree = "<group>"; };
 		5671C53F172EC40CF6C3FEC2 /* MiNaAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiNaAPI.swift; sourceTree = "<group>"; };
 		6CCDD6CDDD2B1CAB201C779C /* Messages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Messages.swift; sourceTree = "<group>"; };
 		FDF300E6C61F4802B87C343D /* WalletScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WalletScreen.swift; sourceTree = "<group>"; };
@@ -67,6 +71,7 @@
 		4ABAF6EFB4854A1DB05CD965 /* DeviceWallet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceWallet.swift; sourceTree = "<group>"; };
 		A8A12EBB70FAEF6B443C4D65 /* EconomyScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EconomyScreen.swift; sourceTree = "<group>"; };
 		A8C055548A4207B3E3A3E490 /* CompanionScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionScreen.swift; sourceTree = "<group>"; };
+		A17A6C45078442B485C1A32F /* DiscoveryRefresh.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoveryRefresh.swift; sourceTree = "<group>"; };
 		12EA8853DD82A9C8C909CED5 /* CommunityScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommunityScreen.swift; sourceTree = "<group>"; };
 		A0225FE17DF8FF49B1E5E981 /* CommunityMedia.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommunityMedia.swift; sourceTree = "<group>"; };
 		63B84050CBA7206F1297506E /* CommunityComposer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommunityComposer.swift; sourceTree = "<group>"; };
@@ -100,7 +105,6 @@
 			isa = PBXGroup;
 			children = (
 				F67DAD14D3514608A9BC3A13 /* MiNaCoins.storekit */,
-				E2EAFEB991DB48A1B2276A32 /* MiNa.entitlements */,
 			);
 			path = Configuration;
 			sourceTree = "<group>";
@@ -128,6 +132,8 @@
 				97DA47A0B9CC1BAFBB1F3D64 /* MiNaRoot.swift */,
 				31FFEBE3A6144EEF96DA5EA2 /* CloudInterface.swift */,
 				E1B637BE2AEB49DE8FB659A1 /* AppAlerts.swift */,
+				D93B14015E0144AC9BE15402 /* PopupPanel.swift */,
+				421A588F6D9C46469747178E /* ReportForm.swift */,
 				5671C53F172EC40CF6C3FEC2 /* MiNaAPI.swift */,
 				6CCDD6CDDD2B1CAB201C779C /* Messages.swift */,
 				FDF300E6C61F4802B87C343D /* WalletScreen.swift */,
@@ -136,6 +142,7 @@
 				4ABAF6EFB4854A1DB05CD965 /* DeviceWallet.swift */,
 				A8A12EBB70FAEF6B443C4D65 /* EconomyScreen.swift */,
 				A8C055548A4207B3E3A3E490 /* CompanionScreen.swift */,
+				A17A6C45078442B485C1A32F /* DiscoveryRefresh.swift */,
 				12EA8853DD82A9C8C909CED5 /* CommunityScreen.swift */,
 				A0225FE17DF8FF49B1E5E981 /* CommunityMedia.swift */,
 				63B84050CBA7206F1297506E /* CommunityComposer.swift */,
@@ -256,6 +263,8 @@
 				F88EA6F2E4EBA62D396A057D /* MiNaRoot.swift in Sources */,
 				782E0915B3414D9BA18529DD /* CloudInterface.swift in Sources */,
 				45DCE40DEF664E28B84DAFA1 /* AppAlerts.swift in Sources */,
+				D93B14015E0144AC9BE15401 /* PopupPanel.swift in Sources */,
+				2DE2CC5BC5054B7F901BD21A /* ReportForm.swift in Sources */,
 				FC1BBB123923FC2F40C3FE4B /* MiNaAPI.swift in Sources */,
 				AC53D7D9239FBDA7D413A624 /* Messages.swift in Sources */,
 				E3909ECD9DB8400E9CB5EA46 /* WalletScreen.swift in Sources */,
@@ -264,6 +273,7 @@
 				63845AB99F094516AD2C1686 /* DeviceWallet.swift in Sources */,
 				CA786547D36266521FCC2858 /* EconomyScreen.swift in Sources */,
 				BF1FC0DDA316B6BF99D1ED3B /* CompanionScreen.swift in Sources */,
+				9B872900CC8441A494D4984F /* DiscoveryRefresh.swift in Sources */,
 				F617D1E553BCB108AD118AB8 /* CommunityScreen.swift in Sources */,
 				72384FB7DBF09E17695A91D4 /* CommunityMedia.swift in Sources */,
 				D919B963D12037CEEC673D29 /* CommunityComposer.swift in Sources */,
@@ -417,7 +427,6 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CODE_SIGN_ENTITLEMENTS = Configuration/MiNa.entitlements;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = MiNa/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -437,7 +446,6 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CODE_SIGN_ENTITLEMENTS = Configuration/MiNa.entitlements;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = MiNa/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (

@@ -26,7 +26,7 @@ struct AccountScreen: View {
                             Link("Open PDF", destination: MiNaAPI.origin.appendingPathComponent("functions/v1/policies/\(key).pdf"))
                         }
                     }.padding()
-                }.background { AccountBackdrop(group: "privacy") }.navigationTitle(policy.title).navigationBarTitleDisplayMode(.inline)
+                }.pageBackground("privacy").navigationTitle(policy.title).navigationBarTitleDisplayMode(.inline)
             } else { Color.clear.minaAlert("This document is unavailable.") }
         } else if route.name == "support" {
             Form {
@@ -36,23 +36,20 @@ struct AccountScreen: View {
                         .disabled(sending || !(5...2000).contains(message.trimmingCharacters(in: .whitespacesAndNewlines).count))
                 }
                 if !notice.isEmpty { Text(notice) }
-            }.scrollContentBackground(.hidden).background { AccountBackdrop(group: "privacy") }.navigationTitle("Contact us").navigationBarTitleDisplayMode(.inline)
+            }.scrollContentBackground(.hidden).pageBackground("privacy").navigationTitle("Contact us").navigationBarTitleDisplayMode(.inline)
         } else {
             let removing = route.name == "delete"
             VStack {
                 Spacer()
-                VStack(spacing: 16) {
-                    Text(removing ? "Delete your MiNa account?" : "Sign out of MiNa?").font(.title3.bold())
-                    Text(removing ? "Your cloud account, uploaded media, messages and associated records will be permanently removed." : "Sign in again with your email and password to return to your account.")
-                        .font(.callout).multilineTextAlignment(.center)
-                    Button(role: .destructive) { Task { await app.leave(delete: removing) } } label: {
-                        Text(removing ? "Permanently delete" : "Sign out").font(.headline).foregroundStyle(.black)
-                            .frame(maxWidth: .infinity,minHeight: 46).background(LinearGradient(colors:[.mint,.cyan],startPoint:.leading,endPoint:.trailing),in: Capsule())
+                PopupPanel(title: removing ? "Delete your MiNa account?" : "Sign out of MiNa?",
+                           message: removing ? "Your cloud account, uploaded media, messages and associated records will be permanently removed." : "Sign in again with your email and password to return to your account.",
+                           close: { app.back() }) {
+                    PopupAction(removing ? "Permanently delete" : "Sign out", removing ? "trash" : "rectangle.portrait.and.arrow.right",
+                                role: removing ? .destructive : nil) {
+                        Task { await app.leave(delete: removing) }
                     }
-                    Button("Cancel") { app.back() }
-                }.padding(24).disabled(app.busy).background { NativeArt("spend",1) }
-                    .clipShape(RoundedRectangle(cornerRadius: 20))
-            }.frame(maxWidth: .infinity).background { AccountBackdrop(group: "privacy") }
+                }.disabled(app.busy).background(PopupTheme.surface, in: RoundedRectangle(cornerRadius: PopupTheme.radius))
+            }.pageBackground("privacy")
                 .navigationTitle(removing ? "Delete account" : "Sign out").navigationBarTitleDisplayMode(.inline)
         }
     }

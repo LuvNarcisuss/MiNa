@@ -50,23 +50,13 @@ struct CompanionTopicOverlay: View {
 
     var body: some View {
         let group = ["sleepTips", "emotion", "life"][topic]
-        GeometryReader { geometry in
-            VStack(spacing: 5) {
-                Spacer(minLength: 0)
+        ScrollView {
+            PopupPanel(title: ["Sleep Tips", "Emotion", "Life Advice"][topic], closeLabel: "Close topic", close: { app.companionTopic = nil }) {
                 NativeArt(group, topic == 2 ? 2 : 1).scaledToFit()
                     .accessibilityLabel(descriptions[topic])
-                Button { app.companionTopic = nil } label: {
-                    NativeArt(group, topic == 2 ? 3 : 2).scaledToFit().frame(width: geometry.size.width * 0.55)
-                }.accessibilityLabel("Done")
-                Button { app.companionTopic = nil } label: {
-                    NativeArt(group, topic == 2 ? 1 : 3).frame(width: 21, height: 21)
-                        .frame(width: 44, height: 44)
-                }.accessibilityLabel("Close topic")
-                Spacer(minLength: 0)
-            }.frame(maxWidth: .infinity).buttonStyle(.plain)
-        }
-        .background { Color.black.opacity(0.58).ignoresSafeArea().onTapGesture { app.companionTopic = nil } }
-        .accessibilityAddTraits(.isModal)
+                PopupAction("Done", "checkmark") { app.companionTopic = nil }
+            }
+        }.popupSurface().presentationDetents([.large])
     }
 }
 
@@ -154,32 +144,24 @@ private struct CompanionConversation: View {
                         .accessibilityLabel("Send")
                 }.padding(.horizontal, 8).background(.white, in: Capsule())
             }.buttonStyle(.plain).padding(.horizontal, 16).padding(.bottom, 6)
-            .accessibilityHidden(help || confirmSession || (remaining > 0 && remaining < 600 && reminder))
-            .overlay {
-                if help || confirmSession || (remaining > 0 && remaining < 600 && reminder) {
-                    ZStack(alignment: .bottom) {
-                        Color.black.opacity(0.45).ignoresSafeArea()
-                        VStack(spacing: 18) {
-                            Text(help ? "About this conversation" : confirmSession ? "Start your session?" : "Session reminder").font(.title3.bold())
-                            Text(help ? Companion.disclosure : confirmSession ? "Sessions last 60 minutes and are free. " + Companion.disclosure : "Less than 10 minutes remain in your session.")
-                                .font(.subheadline).multilineTextAlignment(.center)
-                            Button(confirmSession ? (sessionRequest?.draft == nil ? "Agree and continue" : "Agree and send") : "Got it") {
-                                if let request = sessionRequest {
-                                    sessionRequest = nil
-                                    perform(draft: request.draft, openSession: true)
-                                }
-                                else if help { help = false } else { reminder = false }
-                            }.frame(maxWidth: .infinity).padding(12).background(LinearGradient(colors: [.mint, .cyan], startPoint: .leading, endPoint: .trailing), in: Capsule())
-                            if confirmSession { Button("Later") { sessionRequest = nil } }
-                        }.padding(24).frame(maxWidth: .infinity).background {
-                            LinearGradient(colors: [Color(red: 0.83, green: 0.96, blue: 0.86), Color(red: 0.87, green: 0.98, blue: 1)], startPoint: .topLeading, endPoint: .bottomTrailing)
-                                .clipShape(RoundedRectangle(cornerRadius: 22)).ignoresSafeArea(edges: .bottom)
-                        }
+            .popupDialog(help ? "About this conversation" : confirmSession ? "Start your session?" : "Session reminder",
+                         isPresented: Binding(get: { help || confirmSession || (remaining > 0 && remaining < 600 && reminder) },
+                                              set: { showing in
+                             guard !showing else { return }
+                             if help { help = false }
+                             else if confirmSession { sessionRequest = nil }
+                             else { reminder = false }
+                         }),
+                         message: help ? Companion.disclosure : confirmSession ? "Sessions last 60 minutes and are free. " + Companion.disclosure : "Less than 10 minutes remain in your session.",
+                         closeLabel: confirmSession ? "Later" : nil) {
+                if let request = sessionRequest {
+                    PopupAction(request.draft == nil ? "Agree and continue" : "Agree and send", "checkmark") {
+                        perform(draft: request.draft, openSession: true)
                     }
-                }
+                } else { PopupAction("Got it", "checkmark") {} }
             }
         }
-        .background { NativeArt("aiChat", 1).ignoresSafeArea() }
+        .pageBackground("aiChat")
         .toolbar(.hidden, for: .navigationBar)
         .minaAlert(failure)
         .onAppear {

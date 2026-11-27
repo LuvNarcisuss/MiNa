@@ -101,30 +101,29 @@ final class DeviceMedia: NSObject, PHPickerViewControllerDelegate, UIDocumentPic
         }
     }
 
-    func pick(_ value: String, presenter: UIViewController?, completion: @escaping Completion) {
+    enum Source { case library, files }
+
+    @MainActor func pick(_ value: String, from source: Source, presenter: UIViewController?, completion: @escaping Completion) {
         guard ["image", "video"].contains(value), pickerReply == nil,
               let presenter, presenter.viewIfLoaded?.window != nil else {
             completion(.failure(MiNaIssue("The media picker is unavailable."))); return
         }
         kind = value
         pickerReply = completion
-        let sheet = UIAlertController(title: value == "video" ? "Choose a video" : "Choose an image",
-                                      message: nil, preferredStyle: .actionSheet)
-        sheet.addAction(UIAlertAction(title: "Photo Library", style: .default) { _ in
+        switch source {
+        case .library:
             var config = PHPickerConfiguration()
             config.filter = value == "video" ? .videos : .images
             config.selectionLimit = 1
             let picker = PHPickerViewController(configuration: config)
             picker.delegate = self
             presenter.present(picker, animated: true)
-        })
-        sheet.addAction(UIAlertAction(title: "Files", style: .default) { _ in
+        case .files:
             let picker = UIDocumentPickerViewController(forOpeningContentTypes: [value == "video" ? .movie : .image], asCopy: false)
             picker.delegate = self
             presenter.present(picker, animated: true)
-        })
-        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in self.complete(.success(["cancelled": true])) })
-        presenter.present(sheet, animated: true)
+        }
+
     }
 
     private func complete(_ result: Result<Payload, Error>) {

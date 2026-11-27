@@ -34,6 +34,7 @@ final class AppAlerts {
         }
         let popup = UIAlertController(title: "MiNa", message: waiting.removeFirst(), preferredStyle: .alert)
         popup.addAction(UIAlertAction(title: "OK", style: .default) { [weak self] _ in self?.schedulePresentation() })
+        popup.view.tintColor = UIColor(PopupTheme.accent)
         visible = popup
         host.present(popup, animated: true)
     }

@@ -8,7 +8,7 @@ struct EconomyScreen: View {
     @EnvironmentObject private var wallet: WalletStore
     private var balance: Int? {
         guard let cloudBalance, let local = wallet.ledger?.balance else { return nil }
-        return wallet.environment == .production ? cloudBalance + local : max(cloudBalance, local)
+        return cloudBalance + local
     }
     private var inventory: [Int: Int] { cloudInventory.merging(wallet.ledger?.inventory ?? [:], uniquingKeysWith: +) }
     @State private var catalog: [Gift] = []
@@ -69,7 +69,7 @@ struct EconomyScreen: View {
         .navigationTitle(route.name == "level" ? "My level" : "Store")
         .navigationBarTitleDisplayMode(.inline)
 
-        .background { AccountBackdrop(group: route.name == "level" ? "level" : "store") }
+        .pageBackground(route.name == "level" ? "level" : "store")
         .minaAlert(notice)
         .task(id: route) {
             await load()
@@ -80,30 +80,24 @@ struct EconomyScreen: View {
         .sheet(item: $selected, onDismiss: {
             if navigateToWallet { navigateToWallet = false; app.go("wallet") }
         }) { gift in
-            VStack(spacing: 14) {
-                if !bag {
-                    Text((balance ?? gift.price) < gift.price ? "Insufficient balance" : "Confirm gift").font(.title2.bold())
-                }
-                NativeArt("store", 3 + gift.id).scaledToFit().frame(height: 76)
-                Text(gift.name).font(.headline)
-                if bag { Text("Owned: \(inventory[gift.id, default: 0])") }
-                else {
-                    Text(gift.price > 0 ? "Add one for \(gift.price) star coins." : "Claim one free gift for today.")
-                    if let balance { Text("Balance: \(balance) star coins") }
-                    if let balance, balance < gift.price {
-                        Button { returnGiftID = gift.id; navigateToWallet = true; selected = nil } label: {
-                            Text("Open wallet").font(.headline).foregroundStyle(.black)
-                                .frame(maxWidth: 280,minHeight: 44).background(LinearGradient(colors:[.mint,.cyan],startPoint:.leading,endPoint:.trailing),in: Capsule())
+            let title = bag ? "Backpack" : (balance ?? gift.price) < gift.price ? "Insufficient balance" : "Confirm gift"
+            PopupPanel(title: title, closeLabel: "Close", close: { if !busy { selected = nil } }) {
+                VStack(spacing: 12) {
+                    NativeArt("store", 3 + gift.id).scaledToFit().frame(height: 76)
+                    Text(gift.name).font(.headline)
+                    if bag { Text("Owned: \(inventory[gift.id, default: 0])") }
+                    else {
+                        Text(gift.price > 0 ? "Add one for \(gift.price) star coins." : "Claim one free gift for today.")
+                        if let balance { Text("Balance: \(balance) star coins") }
+                        if let balance, balance < gift.price {
+                            PopupAction("Open wallet", "wallet.pass") { returnGiftID = gift.id; navigateToWallet = true; selected = nil }
+                        } else {
+                            PopupAction("Confirm", "checkmark") { Task { await acquire(gift) } }
+                                .disabled(balance == nil || busy).opacity(balance == nil || busy ? 0.48 : 1)
                         }
-                    } else {
-                        Button { Task { await acquire(gift) } } label: {
-                            NativeArt("spend",4).scaledToFit().frame(maxWidth: 282,minHeight: 48)
-                        }.buttonStyle(.plain).accessibilityLabel("Confirm")
-                            .disabled(balance == nil || busy).opacity(balance == nil || busy ? 0.48 : 1)
                     }
-                }
-                Button("Close") { selected = nil }.disabled(busy)
-            }.padding().frame(maxWidth: .infinity,maxHeight: .infinity).background { NativeArt("spend",1).ignoresSafeArea() }.presentationDetents([.medium]).interactiveDismissDisabled(busy)
+                }.frame(maxWidth: .infinity)
+            }.disabled(busy).modifier(FittedPopup()).interactiveDismissDisabled(busy)
         }
     }
 

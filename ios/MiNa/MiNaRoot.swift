@@ -288,12 +288,12 @@ final class MiNaAppModel: ObservableObject {
         AccountLibrary.owner = "Device"
     }
 
-    func pick(_ kind: String) async throws -> [String: Any] {
+    func pick(_ kind: String, from source: DeviceMedia.Source) async throws -> [String: Any] {
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
         var presenter = scenes.first(where: { $0.activationState == .foregroundActive })?.windows.first(where: \.isKeyWindow)?.rootViewController
         while let next = presenter?.presentedViewController { presenter = next }
         return try await withCheckedThrowingContinuation { continuation in
-            media.pick(kind, presenter: presenter) { continuation.resume(with: $0) }
+            media.pick(kind, from: source, presenter: presenter) { continuation.resume(with: $0) }
         }
     }
 }
@@ -312,6 +312,26 @@ func nativeArtwork(_ group: String, _ name: String) -> Image {
 }
 
 func NativeArt(_ group: String, _ number: Int) -> Image { nativeArtwork(group, String(number)) }
+
+extension View {
+    func pageBackground(_ group: String?) -> some View {
+        frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background {
+                if let group {
+                    NativeArt(group, 1)
+                        .background {
+                            // Some board exports have transparent rows at the screen edges.
+                            LinearGradient(colors: [Color(red: 0.71, green: 0.94, blue: 0.84),
+                                                    Color(red: 0.92, green: 0.99, blue: 1)],
+                                           startPoint: .top, endPoint: .bottom)
+                        }
+                        .ignoresSafeArea()
+                        .accessibilityHidden(true)
+                        .allowsHitTesting(false)
+                }
+            }
+    }
+}
 
 struct NativePortrait: View {
     @EnvironmentObject var app: MiNaAppModel
@@ -389,15 +409,16 @@ struct MiNaRoot: View {
             .navigationDestination(for: NativeRoute.self) { route in destination(route) }
         }
         .id(app.signedIn)
-        .accessibilityHidden(app.companionTopic != nil)
-        .overlay { if app.signedIn, let topic = app.companionTopic { CompanionTopicOverlay(topic: topic) } }
+        .sheet(isPresented: Binding(get: { app.signedIn && app.companionTopic != nil }, set: { if !$0 { app.companionTopic = nil } })) {
+            if let topic = app.companionTopic { CompanionTopicOverlay(topic: topic) }
+        }
         .overlay(alignment: .top) { if app.signedIn { IncomingCallBanner() } }
         .tint(Color(red: 0.04, green: 0.43, blue: 0.43))
         .environment(\.colorScheme, .light)
         .preferredColorScheme(statusBarScheme)
-        .alert("Community safety", isPresented: Binding(get: { app.safetyNotice != nil }, set: { if !$0 { app.safetyNotice = nil } })) {
-            Button("OK") { app.safetyNotice = nil }
-        } message: { Text(app.safetyNotice ?? "") }
+        .popupDialog("Community safety", isPresented: Binding(get: { app.safetyNotice != nil }, set: { if !$0 { app.safetyNotice = nil } }), message: app.safetyNotice, closeLabel: nil) {
+            PopupAction("OK", "checkmark") {}
+        }
         .task { await app.restore() }
     }
 
@@ -436,8 +457,10 @@ private struct WelcomeScreen: View {
 
     private func validate(_ field: Field?) {
         if field == .email && !email.isEmpty && !emailIsValid {
+            focused = nil
             AppAlerts.shared.show("Enter a valid email address.")
         } else if field == .confirmation && !confirmation.isEmpty && !passwordsMatch {
+            focused = nil
             AppAlerts.shared.show("Passwords do not match.")
         }
     }
@@ -549,10 +572,9 @@ private struct WelcomeScreen: View {
             lastField = next
             if previous != next { validate(previous) }
         }
-        .alert("Account created", isPresented: $app.showingRegistrationSuccess) {
-            Button("OK") { app.entryMode = .signIn }
-        } message: {
-            Text("You can now sign in with your email and password.")
+        .popupDialog("Account created", isPresented: $app.showingRegistrationSuccess,
+                     message: "You can now sign in with your email and password.", closeLabel: nil) {
+            PopupAction("OK", "checkmark") { app.entryMode = .signIn }
         }
         .onChange(of: app.entryMode) { _ in
             focused = nil

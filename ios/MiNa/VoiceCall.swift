@@ -36,9 +36,8 @@ struct IncomingCallBanner: View {
                         }
                     }.buttonStyle(.bordered)
                 }.padding().background(.regularMaterial,in: RoundedRectangle(cornerRadius: 18)).padding(.horizontal)
-                .confirmationDialog("Leave your current audio session?", isPresented: $switching) {
-                    Button("Leave and open call") { app.go("messages.call",call.id) }
-                    Button("Stay here",role: .cancel) {}
+                .popupDialog("Leave your current audio session?", isPresented: $switching, closeLabel: "Stay here") {
+                    PopupAction("Leave and open call", "phone") { app.go("messages.call",call.id) }
                 }
             }
         }
@@ -183,7 +182,7 @@ struct VoiceCallScreen: View {
                     .disabled(peer == nil).accessibilityLabel(muted ? "Unmute" : "Mute")
                 }
             }.padding(.bottom,30)
-        }.padding(.horizontal, 14).background { NativeArt("call",1).ignoresSafeArea() }.toolbar(.hidden, for: .navigationBar)
+        }.padding(.horizontal, 14).pageBackground("call").toolbar(.hidden, for: .navigationBar)
         .minaAlert(error)
         .minaAlert(endingError)
         .task {

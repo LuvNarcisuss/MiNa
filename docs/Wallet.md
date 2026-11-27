@@ -22,20 +22,17 @@ One device-only Keychain item per account and environment holds purchase entries
 
 ## Store and live gifts
 
-Buying a priced store item entirely with local coins saves its debit and backpack quantity in one local write. The existing catalog supplies the price. Free claims, earlier server funds and server inventory keep their original rules. StoreKit test coins can buy items in the local test backpack. Live rooms use production funds and inventory.
+A successful StoreKit purchase adds the pack once to the signed-in account’s device balance. Sending a catalog gift uses its unit price times its quantity. Sending an item already in the backpack consumes the item. The same rules apply to the active Xcode, sandbox or production wallet, whose purchase balances remain separate.
 
-For a live gift or a store purchase using both sources, the app reserves the device contribution under the operation UUID. Apple App Attest signs the account, operation, recipients, item, quantity, current quote and device contribution. Only the spending authorization goes to `gift-spend`. The database checks the catalog, original request, room status, participants and blocking, applies any server-funded remainder, and commits one receipt. Delivery contributes the normal gift value to rankings. A retry uses the same operation. When delivery is uncertain, the spending screens reconcile the reservation with a receipt or a server cancellation that prevents a late delivery. A confirmed cancellation releases the local reservation.
+When the sender is alone in a room that accepts gifts, the gift drawer opens the friend invitation list. A single other listener is preselected when they join. With several listeners, the sender can choose the recipient. If the selected listener leaves before sending, the drawer returns to gift selection and requires a new review.
 
-## Release dependencies
+The local ledger reserves the debit before the app submits a room delivery. Supabase checks the signed-in sender, active room participants, room settings, blocks and catalog price, then stores a single recipient-visible gift receipt. A retry uses the same operation ID. After a lost response the service serializes reconciliation against delivery, confirms the receipt or closes the operation and releases the local funds. A paid addition to the backpack funded entirely on the device is one local write.
 
-The checked-in `device_gift_spending` migration and `gift-spend` function support device-funded live delivery. The production function needs MiNa's `MINA_APPLE_TEAM_ID` and an iPhone build signed for `com.mina.bedtime` with the production App Attest entitlement. These dependencies apply to shared gift fulfillment. StoreKit purchase verification and local store purchases do not need an attestation key.
+Earlier server funds and backpack inventory remain usable. The database debits only the remaining server-funded share. Items bought with a device contribution stay in the device backpack. Only server-backed value is eligible for the shared spending ranking. A device-funded gift still records the selected item, quantity, sender and recipient.
 
-The replacement `wallet-purchase` handler returns an upgrade message to earlier clients. At cutover, retire the old verifier and freeze legacy credits before distributing the new client. Bundle the result of this read-only export as `ios/MiNa/LegacyPurchaseCredits.json`:
+## Deployment
 
-```sql
-select coalesce(json_agg(encode(sha256(convert_to(environment || ':' || transaction_id, 'UTF8')), 'hex')), '[]'::json)
-from public.coin_purchases;
-```
+The company project serves the authenticated `deliver_wallet_gift` and `resolve_device_gift` RPCs. Neither requires an Apple Team ID or a device attestation service. The previous `wallet-purchase` Edge Function was removed from the company dashboard. Its public route returned HTTP 404. The historical SQL function `credit_coin_purchase` still exists because the separate cleanup migration was declined. Current iOS purchases do not call it.
 
 The app finishes an already credited legacy transaction without issuing a second grant. The bundled snapshot contains only hashes and currently represents an empty purchase history. Keep historical wallet, purchase and inventory records. On November 25, 2026 a read-only count in the MiNa company project returned zero recorded purchases and zero positive server balances. This count describes that snapshot only.
 
@@ -43,4 +40,4 @@ The app finishes an already credited legacy transaction without issuing a second
 
 The shared scheme selects `Configuration/MiNaCoins.storekit` for its Debug Run. For Apple sandbox product lookup, select None for the StoreKit configuration. Release signing and App Store Connect product activation require the MiNa developer account.
 
-The November 24 simulator check inspected the seven localized fixture prices and submitted no purchase. It predates the local-wallet change. This revision has undergone static inspection only. Local StoreKit delivery and redelivery, account switching, interrupted writes, App Attest on a signed iPhone, live gift settlement, Apple sandbox and production purchases still require runtime verification.
+The November 24 simulator check inspected the seven fixture prices before the local-wallet change. On November 25, Xcode StoreKit Test exercised all seven purchases, local delivery and duplicate callbacks. The [November 25 regression review](qa/2026-11-25/Regression.md) records the balances and observed deployment state. A later test on the same simulator bought 400 coins using StoreKit Test and sent two gifts at 29 coins each. The recipient read one receipt and a retry kept the balance at 342. Adding a backpack item cost 29 coins. Sending that stored item incurred no second charge. An insufficient balance and a room with gifts disabled each left the persisted balance at 313. Both temporary accounts were removed. Account switching during checkout, interrupted writes and Apple sandbox or production purchases still require separate evidence.

@@ -25,6 +25,7 @@ struct DeviceWallet: Codable {
         let date: Date
         var pending: Bool
         var cloudCoins: Int? = nil
+        var fromBag: Bool? = nil
 
         var isStore: Bool { room == nil }
     }
@@ -37,7 +38,7 @@ struct DeviceWallet: Codable {
     var inventory: [Int: Int] {
         var items: [Int: Int] = [:]
         for entry in spending {
-            items[entry.item, default: 0] += entry.addedItems - entry.localItems
+            items[entry.item, default: 0] += (entry.pending ? 0 : entry.addedItems) - entry.localItems
         }
         return items
     }

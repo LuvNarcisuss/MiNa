@@ -71,6 +71,9 @@ func roomFilter(_ value: String) -> String {
 }
 func roomUUID() -> String { UUID().uuidString.lowercased() }
 
+func roomAudienceLabel(_ count: Int) -> String { count == 1 ? "1 member" : "\(count) members" }
+func roomOnlineLabel(_ count: Int) -> String { "\(count) online" }
+
 struct RoomsScreen: View {
     let route: NativeRoute
     var body: some View {
@@ -110,12 +113,18 @@ struct RoomChoiceRow: View {
 
 private struct RoomDiscovery: View {
     @EnvironmentObject var app: MiNaAppModel
+    @Environment(\.scenePhase) private var phase
     let route: String
     @State private var followed = false
     @State private var query = ""
     @State private var rooms: [RoomRow] = []
     @State private var status = "Finding rooms…"
     @State private var retry = 0
+    @State private var loadRequest = DiscoveryLoad()
+    @State private var roomOrder = DiscoveryOrder()
+    @State private var recommendationOrder = DiscoveryOrder()
+    private var loadKey: String { "\(route)-\(followed)-\(retry)" }
+    private var visible: Bool { app.route.name == route && phase == .active }
     var home: Bool { route == "rooms" }
     var search: Bool { route == "rooms.search" }
     var drafts: [RoomRow] { app.state("room.drafts") as? [RoomRow] ?? [] }
@@ -130,10 +139,24 @@ private struct RoomDiscovery: View {
         let live = entries.filter { $0.live }.sorted { ($0.listeners ?? 0) > ($1.listeners ?? 0) }
         return live + entries.filter { !$0.live }
     }
+    private var featuredCandidates: [DiscoveryEntry] {
+        let ranked = hot
+        let live = ranked.filter(\.live)
+        return live.count >= 2 ? live : ranked
+    }
+    private var listedRooms: [DiscoveryEntry] {
+        let matching = rooms.filter { matches($0.roomText("title") + " " + $0.roomText("topic")) }
+        return roomOrder.arranged(matching.map(DiscoveryEntry.init(room:)))
+    }
+    private var listedSounds: [DiscoveryEntry] {
+        let saved = app.state("room.savedSounds") as? [String] ?? []
+        let sounds = RoomSound.all.filter { (!followed || saved.contains($0.id)) && matches([$0.title,$0.detail, $0.topic].joined(separator: " ")) }
+        return recommendationOrder.arranged(sounds.map(DiscoveryEntry.init(sound:)))
+    }
 
     var body: some View {
         GeometryReader { geometry in
-            ScrollView {
+            let scroll = ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     if home {
                         homeHeader
@@ -145,13 +168,13 @@ private struct RoomDiscovery: View {
                             .padding(.bottom, 10)
                             sectionHeader(2, "Hot Rooms", "rooms.hot")
                             LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible())], spacing: 0) {
-                                ForEach(hot.prefix(2)) { item in
+                                ForEach(roomOrder.arranged(featuredCandidates).prefix(2)) { item in
                                     DiscoveryCard(entry: item, featured: true) { open(item) }
                                 }
                             }
                             .padding(.bottom, 8)
                             sectionHeader(3, "Recommended", "rooms.recommended")
-                            recommendations(Array(entries.prefix(3)))
+                            recommendations(Array(recommendationOrder.arranged(entries).prefix(3)))
                             if status == "Live rooms could not load." { statusMessage }
                             draftList
                         } else { standardList }
@@ -164,39 +187,58 @@ private struct RoomDiscovery: View {
                 .padding(.bottom, home ? 75 : 12)
                 .frame(width: geometry.size.width, alignment: .topLeading)
             }
+            if home { scroll.refreshable { await reload(pull: true) } } else { scroll }
         }
-        .background {
-            if home { NativeArt("home", 1).ignoresSafeArea().accessibilityHidden(true) }
-            else if search { NativeArt("search",1).ignoresSafeArea().accessibilityHidden(true) }
-        }
+        .pageBackground(home ? "home" : search ? "search" : nil)
         .navigationTitle(home ? "" : search ? "Search rooms" : ["rooms.hot":"Hot Rooms", "rooms.recommended":"Recommended", "rooms.sounds":"Soundscapes"][route] ?? "Live rooms")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(home || search ? .hidden : .visible, for: .navigationBar)
         .minaAlert(status == "Live rooms could not load." ? status : "")
-        .task(id: "\(route)-\(followed)-\(retry)") {
-            guard route != "rooms.sounds" else { return }
+        .task(id: "\(loadKey)-\(visible)") {
+            guard visible, route != "rooms.sounds" else { return }
             rooms = []; status = "Finding rooms…"
             while !Task.isCancelled {
-                do {
-                    var path = "rooms?closed=eq.false&order=created_at.desc&limit=100"
-                    if home || route == "rooms.hot" || route == "rooms.recommended" {
-                        let cutoff = roomFilter(roomStamp(Date().addingTimeInterval(-60)))
-                        path += "&select=*,room_members(seat)&room_members.last_seen=gte." + cutoff
-                    }
-                    var skip = false
-                    if followed {
-                        let links = try await app.api.rows("follows?select=followed_id&follower_id=eq." + app.api.userID)
-                        let ids = links.map { $0.roomText("followed_id") }
-                        skip = ids.isEmpty
-                        path += "&host_id=in.(" + ids.joined(separator: ",") + ")"
-                    }
-                    let result = skip ? [] : try await app.api.rows(path)
-                    try Task.checkCancellation()
-                    rooms = result; status = ""
-                    if home { app.didRefreshRoot("rooms") }
-                } catch { if Task.isCancelled { return }; rooms = []; status = "Live rooms could not load." }
-                try? await Task.sleep(nanoseconds: 20_000_000_000)
+                await reload()
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
             }
+        }
+    }
+
+    @MainActor private func reload(pull: Bool = false) async {
+        let key = loadKey
+        let owner = app.api.userID
+        guard let request = loadRequest.begin(scope: key, pull: pull) else { return }
+        defer { loadRequest.finish(request) }
+        func isCurrent() -> Bool {
+            !Task.isCancelled && visible && request == loadRequest.current && key == loadKey && owner == app.api.userID
+        }
+        do {
+            var path = "rooms?closed=eq.false&order=created_at.desc&limit=100&select=*,room_audience_count,online_room_members(count)"
+            var skip = false
+            if followed {
+                let links = try await app.api.rows("follows?select=followed_id&follower_id=eq." + owner)
+                let ids = links.map { $0.roomText("followed_id") }
+                skip = ids.isEmpty
+                path += "&host_id=in.(" + ids.joined(separator: ",") + ")"
+            }
+            let result = skip ? [] : try await app.api.rows(path)
+            guard isCurrent() else { return }
+            let firstRoom = pull ? (followed ? listedRooms : roomOrder.arranged(featuredCandidates)).first?.id : nil
+            let firstSuggestion = pull ? (followed ? listedSounds : recommendationOrder.arranged(entries)).first?.id : nil
+            rooms = result
+            if pull {
+                roomOrder.shuffle(followed ? listedRooms : featuredCandidates, replacing: firstRoom)
+                recommendationOrder.shuffle(followed ? listedSounds : entries, replacing: firstSuggestion)
+            }
+            status = ""
+            if home { app.didRefreshRoot("rooms") }
+        } catch {
+            guard isCurrent() else { return }
+            for index in rooms.indices {
+                rooms[index].removeValue(forKey: "online_room_members")
+                rooms[index].removeValue(forKey: "room_audience_count")
+            }
+            status = "Live rooms could not load."
         }
     }
     private var homeHeader: some View {
@@ -301,16 +343,13 @@ private struct RoomDiscovery: View {
             if search { TextField("Search by name or topic", text: $query).textFieldStyle(.roundedBorder) }
             if route != "rooms.sounds" {
                 Text(followed ? "Followed rooms" : "Live rooms").font(.title3.bold())
-                let found = rooms.filter { matches($0.roomText("title") + " " + $0.roomText("topic")) }
-                recommendations(found.map(DiscoveryEntry.init(room:)))
-                if found.isEmpty { statusMessage }
+                recommendations(listedRooms)
+                if listedRooms.isEmpty || status == "Live rooms could not load." { statusMessage }
             }
             if route != "rooms.liveList" {
                 Text(followed ? "Saved sounds" : "Soundscapes").font(.title3.bold())
-                let saved = app.state("room.savedSounds") as? [String] ?? []
-                let sounds = RoomSound.all.filter { (!followed || saved.contains($0.id)) && matches([$0.title,$0.detail,RoomSound.find($0.id)?.topic ?? ""].joined(separator: " ")) }
-                recommendations(sounds.map(DiscoveryEntry.init(sound:)))
-                if sounds.isEmpty { Text(followed ? "Save a soundscape from its listening room." : "No matching soundscapes.") }
+                recommendations(listedSounds)
+                if listedSounds.isEmpty { Text(followed ? "Save a soundscape from its listening room." : "No matching soundscapes.") }
                 if !followed && route != "rooms.sounds" { draftList }
             }
         }
@@ -326,6 +365,7 @@ private struct DiscoveryEntry: Identifiable {
     let visibility: String
     let live: Bool
     let listeners: Int?
+    let memberCount: Int?
     let started: Date?
     let loop: TimeInterval?
 
@@ -336,7 +376,8 @@ private struct DiscoveryEntry: Identifiable {
         detail = room.roomText("topic")
         visibility = ["private": "Only me", "followers": "Followers only"][room.roomText("visibility")] ?? "Public room"
         live = true
-        listeners = (room["room_members"] as? [RoomRow])?.count
+        memberCount = room["room_audience_count"] as? Int
+        listeners = (room["online_room_members"] as? [RoomRow])?.first?["count"] as? Int
         started = roomDate(room.roomText("created_at"))
         loop = nil
     }
@@ -348,6 +389,7 @@ private struct DiscoveryEntry: Identifiable {
         detail = sound.detail
         visibility = "Soundscape"
         live = false
+        memberCount = nil
         listeners = nil
         started = nil
         loop = CloudInterface.catalog?.sounds[sound.id]?.seconds
@@ -375,6 +417,8 @@ private struct DiscoveryCard: View {
         .buttonStyle(.plain)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(entry.title + ", " + entry.visibility)
+        .accessibilityValue(entry.live ? [entry.memberCount.map(roomAudienceLabel), entry.listeners.map(roomOnlineLabel)].compactMap { $0 }.joined(separator: ", ") : "")
+        .accessibilityIdentifier((featured ? "featured-room-" : "discovery-card-") + entry.id)
         .accessibilityHint(entry.live ? "Enter voice room" : "Open soundscape")
     }
 
@@ -387,12 +431,20 @@ private struct DiscoveryCard: View {
                 RoomArtwork(entry.cover).scaledToFit()
                     .mask(LinearGradient(stops: [.init(color: .black, location: 0.88), .init(color: .clear, location: 1)], startPoint: .top, endPoint: .bottom))
             }
+            .overlay(alignment: .topLeading) {
+                if let online = entry.listeners {
+                    Text(roomOnlineLabel(online)).font(.caption2.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 7).padding(.vertical, 3)
+                        .background(.black.opacity(0.55), in: Capsule()).padding(7)
+                }
+            }
             .overlay(alignment: .bottomLeading) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(entry.title).font(.system(size: 14, weight: .medium)).lineLimit(1)
                     HStack(spacing: 3) {
                         NativeArt("home", entry.live ? 10 : 12).scaledToFit().frame(width: 13, height: 13)
-                        Text(entry.listeners.map(String.init) ?? (entry.live ? "Live" : "Soundscape"))
+                        Text(entry.memberCount.map(roomAudienceLabel) ?? (entry.live ? "—" : "Soundscape"))
                         Spacer(minLength: 2)
                         timeLabel.foregroundStyle(Color(red: 0.64, green: 1, blue: 0.63))
                     }.font(.system(size: 11, weight: .medium))
@@ -416,7 +468,7 @@ private struct DiscoveryCard: View {
                 .overlay(alignment: .bottom) {
                     HStack(spacing: 3) {
                         NativeArt("home", entry.live ? 11 : 12).frame(width: 13, height: 13)
-                        Text(entry.listeners.map(String.init) ?? (entry.live ? "Live" : "Soundscape"))
+                        Text(entry.memberCount.map(roomAudienceLabel) ?? (entry.live ? "—" : "Soundscape"))
                     }.font(.system(size: 10, weight: .medium)).foregroundStyle(.white)
                         .frame(maxWidth: .infinity).padding(.vertical, 3).background(.black.opacity(0.45))
                 }.clipShape(RoundedRectangle(cornerRadius: 9))
@@ -427,7 +479,7 @@ private struct DiscoveryCard: View {
                 HStack(alignment: .bottom, spacing: 4) {
                     VStack(alignment: .leading, spacing: 2) {
                         metadata(14, entry.visibility, Color(red: 0.01, green: 0.47, blue: 0.79))
-                        metadata(12, entry.live ? "Voice room" : "Looping audio", green)
+                        metadata(12, entry.live ? entry.listeners.map(roomOnlineLabel) ?? "Audience unavailable" : "Looping audio", green)
                     }
                     Spacer(minLength: 2)
                     NativeArt("home", 15).scaledToFit().frame(width: 71).accessibilityHidden(true)
@@ -476,8 +528,8 @@ private struct RoomEditorView: View {
                 Spacer().frame(height: 129)
                 VStack(alignment: .leading,spacing: 13) {
                     HStack(spacing: 14) {
-                        Menu {
-                            ForEach(RoomSound.all) { sound in Button(sound.title) { cover = sound.id } }
+                        PopupMenu("Room cover") {
+                            ForEach(RoomSound.all) { sound in PopupAction(sound.title, "photo", selected: cover == sound.id) { cover = sound.id } }
                         } label: {
                             RoomArtwork(cover).scaledToFill().frame(width: 80,height: 80).clipShape(RoundedRectangle(cornerRadius: 9))
                                 .overlay { NativeArt("createRoom",5).scaledToFit().frame(width: 18,height: 18).padding(8).background(.black.opacity(0.35),in: Circle()) }
@@ -490,7 +542,7 @@ private struct RoomEditorView: View {
                         .lineLimit(2...3).padding(10).background(fieldColor,in: RoundedRectangle(cornerRadius: 8)).onChange(of: title) { title = String($0.prefix(20)) }
                     HStack {
                         editorLabel(4,"Room topic"); Spacer()
-                        Menu { ForEach(["Light music","Bedtime stories","Night chat"],id: \.self) { t in Button(t) { topic = t } } }
+                        PopupMenu("Room topic") { ForEach(["Light music","Bedtime stories","Night chat"],id: \.self) { t in PopupAction(t, "music.note", selected: topic == t) { topic = t } } }
                             label: { HStack(spacing: 5) { NativeArt("room",4).frame(width: 17,height: 17); Text(topic); Text("›") }.font(.caption).padding(8).background(fieldColor,in: Capsule()) }
                     }
                     HStack(spacing: 5) {
@@ -514,7 +566,7 @@ private struct RoomEditorView: View {
                 Button("Save private draft") { save(live: false) }.frame(minHeight: 44)
                 Text("Your microphone starts off.").font(.caption)
             }.padding(.horizontal,19).padding(.bottom,18)
-        }.background { NativeArt("createRoom",1).ignoresSafeArea().accessibilityHidden(true) }
+        }.pageBackground("createRoom")
         .minaAlert(error)
         .tint(.mint).foregroundColor(.white).buttonStyle(.plain).disabled(busy).toolbar(.hidden,for: .navigationBar).onAppear {
             if let id, let d = drafts.first(where: { $0.roomText("id") == id }) {

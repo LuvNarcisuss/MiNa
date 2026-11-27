@@ -81,17 +81,19 @@ struct WalletScreen: View {
         }
         .foregroundStyle(.primary)
         .buttonStyle(.plain)
-        .background { NativeArt("wallet", 1).ignoresSafeArea().accessibilityHidden(true) }
+        .pageBackground("wallet")
         .toolbar(.hidden, for: .navigationBar)
         .minaAlert(store.problem)
         .minaAlert(store.catalogProblem)
         .minaAlert(SKPaymentQueue.canMakePayments() ? "" : "Purchases are disabled on this iPhone.")
         .task { refresh() }
         .onChange(of: scenePhase) { phase in if phase == .active { store.recover() } }
-        .alert(item: Binding(get: { store.notices.first }, set: { if $0 == nil { store.dismissNotice() } })) { notice in
-            Alert(title: Text("Purchase successful"),
-                  message: Text("\(notice.coins.formatted()) star coins added."),
-                  dismissButton: .default(Text("OK")))
+        .sheet(item: Binding(get: { store.notices.first }, set: { _ in })) { notice in
+            PopupPanel(title: "Purchase successful", message: "\(notice.coins.formatted()) star coins added.") {
+                PopupAction("OK", "checkmark") {
+                    if store.notices.first?.id == notice.id { store.dismissNotice() }
+                }
+            }.modifier(FittedPopup()).interactiveDismissDisabled()
         }
         .sheet(isPresented: $showHistory) { WalletActivity(store: store) }
     }
@@ -158,20 +160,20 @@ private struct WalletActivity: View {
                     }
                 }
             } else {
-                NavigationStack {
+                VStack(spacing: 0) {
+                    PopupHeading(title: "Recent activity", closeLabel: "Done") { dismiss() }
+                        .padding(.horizontal, 20).padding(.top, 18)
                     List {
                         if !message.isEmpty && activityError.isEmpty { Text(message) }
                         ForEach(items) { item in entryRow(item) }
-                    }
-                    .navigationTitle("Recent activity").navigationBarTitleDisplayMode(.inline)
-                    .toolbar { Button("Done") { dismiss() } }
+                    }.scrollContentBackground(.hidden)
                     .refreshable { store.reloadLedger(); await loadEarlierSpending() }
                     .task(id: store.owner + store.environment.rawValue) {
                         earlierSpending = []
                         activityError = ""
                         await loadEarlierSpending()
                     }
-                }
+                }.popupSurface()
             }
         }.minaAlert(activityError).minaAlert(store.problem)
     }

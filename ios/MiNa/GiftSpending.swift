@@ -1,5 +1,3 @@
-import CryptoKit
-import DeviceCheck
 import Foundation
 
 @MainActor
@@ -38,8 +36,9 @@ final class GiftSpending {
     func recover() async throws {
         guard wallet.ledger != nil else { return }
         let owner = wallet.owner
+        let environment = wallet.environment
         for entry in wallet.ledger?.spending.filter(\.pending) ?? [] {
-            guard wallet.owner == owner else { throw CancellationError() }
+            guard wallet.owner == owner, wallet.environment == environment else { throw CancellationError() }
             guard inFlight.insert(entry.id).inserted else { continue }
             defer { inFlight.remove(entry.id) }
             _ = try await resolve(entry, owner: owner)
@@ -55,7 +54,8 @@ final class GiftSpending {
               inFlight.insert(operation).inserted else { throw MiNaIssue("Your wallet is busy. Try again.") }
         defer { inFlight.remove(operation) }
         if let saved = ledger.spending.first(where: { $0.id == operation }) {
-            guard saved.room == room, saved.recipient == recipient, saved.item == item, saved.quantity == quantity else {
+            guard saved.room == room, saved.recipient == recipient, saved.item == item, saved.quantity == quantity,
+                  saved.fromBag == nil || saved.fromBag == fromBag else {
                 throw MiNaIssue("Choose this gift again.")
             }
             if saved.pending {
@@ -73,55 +73,39 @@ final class GiftSpending {
             if receipt["canceled"] as? Bool == true { throw MiNaIssue("Review the gift and confirm again.", code: "gift_canceled") }
             return
         }
+        guard RoomGifts.names.indices.contains(item), (room == nil) == (recipient == nil),
+              !fromBag || room != nil, price <= Int.max / quantity else { throw MiNaIssue("Choose this gift again.") }
         let total = quantity * price
         let environment = wallet.environment
-        let production = environment == .production
-        let canUseCoins = production || (room == nil && ledger.balance >= total)
-        let localCoins = !fromBag && canUseCoins ? min(ledger.balance, total) : 0
-        let localItems = fromBag && production ? min(ledger.inventory[item, default: 0], quantity) : 0
-        let deviceOnly = room == nil && total > 0 && localCoins == total
+        let localCoins = fromBag ? 0 : min(ledger.balance, total)
+        let localItems = fromBag ? min(ledger.inventory[item, default: 0], quantity) : 0
+        let storePurchase = room == nil && localCoins > 0
+        let deviceOnly = storePurchase && localCoins == total
         let entry = DeviceWallet.Spend(id: operation, item: item, quantity: quantity, coins: localCoins,
-            room: room, recipient: recipient, localItems: localItems, addedItems: deviceOnly ? quantity : 0,
-            date: Date(), pending: !deviceOnly)
-        if deviceOnly {
-            try wallet.updateLedger { $0.spending.append(entry) }
-            return
-        }
-
-        let deviceFunded = localCoins > 0 || localItems > 0
-        var request: [String: Any] = ["gift_index": item, "quantity": quantity, "operation": operation]
-        if let room, let recipient {
-            request["target_room"] = room
-            request["recipient"] = recipient
-            request["use_inventory"] = fromBag
-        }
-        if deviceFunded {
-            guard DCAppAttestService.shared.isSupported else { throw MiNaIssue("Device-funded gift delivery requires a supported iPhone.") }
-        }
-        // Key registration happens before reserving any coins. Only the later assertion authorizes this gift.
-        let key: String?
-        if deviceFunded { key = try await registeredKey(owner: owner) }
-        else { key = nil }
-        try check(owner)
-        guard environment == wallet.environment else { throw MiNaIssue("Review the gift in your current wallet.") }
+            room: room, recipient: recipient, localItems: localItems, addedItems: storePurchase ? quantity : 0,
+            date: Date(), pending: !deviceOnly, fromBag: fromBag)
         try wallet.updateLedger { current in
             guard current.balance >= localCoins, current.inventory[item, default: 0] >= localItems else {
                 throw MiNaIssue("Your balance or backpack changed. Review the gift again.")
             }
             current.spending.append(entry)
         }
+        if deviceOnly { return }
         do {
-            if let key { try await authorize(entry, owner: owner, total: total, key: key) }
-            try check(owner)
-            let receipt = try await api.giftRequest(room == nil ? "/rest/v1/rpc/acquire_gift" : "/rest/v1/rpc/send_gift",
-                                                    body: request, owner: owner)
+            let request: [String: Any] = [
+                "target_room": room as Any? ?? NSNull(), "recipient": recipient as Any? ?? NSNull(),
+                "gift_index": item, "quantity": quantity, "operation": operation, "use_inventory": fromBag,
+                "unit_price": price, "device_coins": localCoins, "device_items": localItems
+            ]
+            let receipt = try await api.giftRequest("/rest/v1/rpc/deliver_wallet_gift", body: request, owner: owner)
             try check(owner)
             guard receipt["id"] as? String == operation else {
                 throw MiNaIssue("Gift delivery could not be confirmed.")
             }
+            guard wallet.environment == environment else { throw CancellationError() }
             try settle(entry, receipt: receipt)
         } catch {
-            if wallet.owner == owner, api.userID == owner {
+            if wallet.owner == owner, api.userID == owner, wallet.environment == environment {
                 if try await resolve(entry, owner: owner) { return }
                 throw MiNaIssue(error.localizedDescription, code: "gift_canceled")
             }
@@ -146,8 +130,10 @@ final class GiftSpending {
 
     private func resolve(_ entry: DeviceWallet.Spend, owner: String) async throws -> Bool {
         try check(owner)
+        let environment = wallet.environment
         let receipt = try await api.giftRequest("/rest/v1/rpc/resolve_device_gift", body: ["p_operation": entry.id], owner: owner)
         try check(owner)
+        guard wallet.environment == environment else { throw CancellationError() }
         guard receipt["id"] as? String == entry.id else {
             throw MiNaIssue("Your gift is awaiting confirmation.")
         }
@@ -157,47 +143,5 @@ final class GiftSpending {
         }
         try settle(entry, receipt: receipt)
         return true
-    }
-
-    private func registeredKey(owner: String) async throws -> String {
-        let service = DCAppAttestService.shared
-        let keySlot = "gift.attest." + owner
-        var key = UserDefaults.standard.string(forKey: keySlot)
-        if key == nil {
-            let fresh = try await service.generateKey()
-            try check(owner)
-            let registration = try await api.giftRequest("/functions/v1/gift-spend", body: ["action": "challenge", "key": fresh], owner: owner)
-            guard let challenge = registration["challenge"] as? String else { throw MiNaIssue("Gift verification is unavailable.") }
-            let proof = try await service.attestKey(fresh, clientDataHash: Data(SHA256.hash(data: Data(challenge.utf8))))
-            try check(owner)
-            let reply = try await api.giftRequest("/functions/v1/gift-spend", body: ["action": "register", "key": fresh, "proof": proof.base64EncodedString()], owner: owner)
-            guard reply["registered"] as? Bool == true else { throw MiNaIssue("This iPhone could not be verified.") }
-            key = fresh
-            UserDefaults.standard.set(fresh, forKey: keySlot)
-        }
-        guard let key else { throw MiNaIssue("This iPhone could not be verified.") }
-        return key
-    }
-
-    private func authorize(_ entry: DeviceWallet.Spend, owner: String, total: Int, key: String) async throws {
-        let keySlot = "gift.attest." + owner
-        let service = DCAppAttestService.shared
-        var payload: [String: Any] = ["owner": owner, "id": entry.id, "item": entry.item, "quantity": entry.quantity,
-                                      "coins": entry.coins, "localItems": entry.localItems, "total": total]
-        payload["room"] = entry.room?.lowercased()
-        payload["recipient"] = entry.recipient?.lowercased()
-        let bytes = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
-        let proof: Data
-        do { proof = try await service.generateAssertion(key, clientDataHash: Data(SHA256.hash(data: bytes))) }
-        catch {
-            if (error as NSError).domain == DCError.errorDomain, (error as NSError).code == DCError.invalidKey.rawValue {
-                UserDefaults.standard.removeObject(forKey: keySlot)
-            }
-            throw error
-        }
-        try check(owner)
-        let reply = try await api.giftRequest("/functions/v1/gift-spend", body: ["action": "authorize", "key": key,
-            "proof": proof.base64EncodedString(), "payload": String(decoding: bytes, as: UTF8.self)], owner: owner)
-        guard reply["operation"] as? String == entry.id else { throw MiNaIssue("Gift authorization failed.") }
     }
 }

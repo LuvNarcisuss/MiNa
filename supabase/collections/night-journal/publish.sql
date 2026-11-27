@@ -109,6 +109,18 @@ values
     ('b9d87e9e-2973-5b28-9354-cc575dad08bc', '5cf153f2-27c1-4976-ad74-f0dff4cf0667', 'Low Tide Letters', 'Night Journal · A place to trade little notes from the shore.', 'moonlit-sea', 'public', false, 'moonlit-sea', '2026-11-21T11:28:00+00:00', '2026-11-21T11:28:00+00:00'),
     ('adbff39b-5c99-56a3-b239-56b5c38bbad4', 'c8f76174-78a4-4943-88cb-5c2665679cdb', 'The Humming Window', 'Night Journal · Share a tune, a rain sound or a bedtime ritual.', 'star-pillow', 'public', false, 'star-pillow', '2026-11-21T11:36:00+00:00', '2026-11-21T11:36:00+00:00')
 on conflict do nothing;
+insert into public.room_regulars (room_id, user_id)
+values
+    ('f4fa8d10-f699-50ce-9dd1-376a2697c4ee', '1614d308-7cbd-41b5-937f-a16f4614d095'),
+    ('f4fa8d10-f699-50ce-9dd1-376a2697c4ee', 'a0d003a1-820b-424b-8e54-77869ea43c38'),
+    ('f4fa8d10-f699-50ce-9dd1-376a2697c4ee', 'bec894d3-db49-4419-9fb3-6ee50d094046'),
+    ('b9d87e9e-2973-5b28-9354-cc575dad08bc', '5cf153f2-27c1-4976-ad74-f0dff4cf0667'),
+    ('b9d87e9e-2973-5b28-9354-cc575dad08bc', '2fee4254-368a-4b4e-b62b-3c9a65c043b5'),
+    ('b9d87e9e-2973-5b28-9354-cc575dad08bc', '3c39c22c-45b2-4525-8f9e-a27cff669033'),
+    ('adbff39b-5c99-56a3-b239-56b5c38bbad4', 'c8f76174-78a4-4943-88cb-5c2665679cdb'),
+    ('adbff39b-5c99-56a3-b239-56b5c38bbad4', '924e6b2d-4130-4018-aea4-6e6dd8f99aa1')
+on conflict (room_id, user_id) do nothing;
+
 insert into public.room_messages (id, room_id, owner_id, body, created_at)
 values
     ('6f98af20-cd0b-586a-9070-3eb0988ac144', 'f4fa8d10-f699-50ce-9dd1-376a2697c4ee', '1614d308-7cbd-41b5-937f-a16f4614d095', 'Tonight’s prompt: what small sound tells you the day is over?', '2026-11-21T11:22:00+00:00'),

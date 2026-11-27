@@ -39,12 +39,24 @@ struct CommunityScreen: View {
             }
         }
         .id(route.name + (route.id ?? ""))
-        .background { NativeArt(route.name == "feed" ? "home" : route.name == "feed.post" ? "post" : "dreams", 1).ignoresSafeArea().accessibilityHidden(true) }
+        .pageBackground(route.name == "feed" ? "home" : route.name == "feed.post" ? "post" : "dreams")
         .tint(Color(red: 0.02, green: 0.43, blue: 0.43))
     }
 }
 
 private var readings: [JournalStory] { CloudInterface.library?.stories ?? [] }
+
+private enum CommunityItem: Identifiable {
+    case entry(CommunityRow)
+    case reading(JournalStory)
+
+    var id: String {
+        switch self {
+        case .entry(let row): return "entry/" + row.communityListID
+        case .reading(let story): return "reading/" + story.id
+        }
+    }
+}
 
 private struct CommunityReportTarget: Identifiable {
     let id: String
@@ -75,6 +87,8 @@ private struct CommunityListing: View {
     @State private var loaded = false
     @State private var failure = ""
     @State private var revision = 0
+    @State private var loadRequest = DiscoveryLoad()
+    @State private var feedOrder = DiscoveryOrder()
     @State private var text = ""
     @State private var emoji = false
     @State private var commentID = UUID()
@@ -103,11 +117,13 @@ private struct CommunityListing: View {
         if author { return dream ? "Dreams" : "Posts" }
         return name == "feed.read" ? "Bedtime reading" : "Dream Space"
     }
-    private var readIndices: [Int] {
-        readings.indices.filter { i in
-            if name == "feed.read" { return readings[i].id == route.id }
-            return name == "feed" && !following && (query.isEmpty || [readings[i].title,readings[i].summary,"MiNa Journal"].contains { $0.localizedCaseInsensitiveContains(query) })
+    private var listedItems: [CommunityItem] {
+        let stories = readings.filter { story in
+            if name == "feed.read" { return story.id == route.id }
+            return name == "feed" && !following && (query.isEmpty || [story.title,story.summary,"MiNa Journal"].contains { $0.localizedCaseInsensitiveContains(query) })
         }
+        let items = visibleRows.map(CommunityItem.entry) + stories.map(CommunityItem.reading)
+        return name == "feed" ? feedOrder.arranged(items) : items
     }
     var body: some View {
         ScrollView {
@@ -119,13 +135,16 @@ private struct CommunityListing: View {
                         Button("Try again") { revision += 1 }
                     } else if (!loaded || loadedSafetyRevision != app.safetyRevision) && name != "feed.read" { ProgressView("Loading…") }
                     if name != "feed.post" {
-                        ForEach(visibleRows, id: \.communityListID) { row in
-                            if activity { activityRow(row) }
-                            else { entry(row) }
+                        ForEach(listedItems) { item in
+                            switch item {
+                            case .entry(let row):
+                                if activity { activityRow(row) } else { entry(row) }
+                            case .reading(let story):
+                                reading(story)
+                            }
                         }
                     }
-                    ForEach(readIndices, id: \.self) { i in reading(i) }
-                    if ((loaded && loadedSafetyRevision == app.safetyRevision) || name == "feed.read") && visibleRows.isEmpty && readIndices.isEmpty {
+                    if ((loaded && loadedSafetyRevision == app.safetyRevision) || name == "feed.read") && listedItems.isEmpty {
                         VStack(spacing: 8) {
                             NativeArt(activity && likes ? "likes" : "activity", activity && likes ? 5 : 4).scaledToFit().frame(width: 112,height: 108).accessibilityHidden(true)
                             Text(detail || name == "feed.read" ? "Content unavailable" : activity ? (likes ? "No likes yet" : "No comments yet") : !query.isEmpty ? "No matches" : dream ? "No dreams yet" : "No posts yet").font(.headline)
@@ -169,7 +188,7 @@ private struct CommunityListing: View {
                 VStack(spacing: 5) { commentInput }.padding(.horizontal, 20).padding(.bottom, 4)
             }
         }
-        .refreshable { revision += 1 }
+        .refreshable { await reload(pull: true) }
         .overlay(alignment: .bottomTrailing) {
             if name == "feed" {
                 Button { app.go("ai") } label: {
@@ -180,17 +199,14 @@ private struct CommunityListing: View {
         }
         .minaAlert(failure)
         .onAppear { if name == "feed.likes" { likes = true } }
-        .onChange(of: "\(following)|\(likes)|\(query)") { _ in rows = []; more = false; loaded = false; failure = "" }
+        .onChange(of: "\(following)|\(likes)|\(query)") { _ in rows = []; more = false; loaded = false; failure = ""; feedOrder = DiscoveryOrder() }
         .onChange(of: scenePhase) { phase in if phase == .active { revision += 1 } }
         .task(id: loadKey) {
             guard name != "feed.read" else { return }
             do {
                 if !query.isEmpty { try await Task.sleep(nanoseconds: 250_000_000) }
                 while !Task.isCancelled {
-                    let key = loadKey
-                    do { try await load(key) } catch {
-                        if key == loadKey && !Task.isCancelled { failure = error.localizedDescription }
-                    }
+                    await reload()
                     try await Task.sleep(nanoseconds: 45_000_000_000)
                 }
             } catch {}
@@ -199,7 +215,7 @@ private struct CommunityListing: View {
             if leavingReportedDetail && app.route == route { app.back() }
             leavingReportedDetail = false
         }) { target in
-            CommunityReportSheet(target: target) { reportAccepted(target) }
+            ReportForm(targetID: target.id, kind: target.kind) { reportAccepted(target) }
         }
     }
     private func entry(_ row: CommunityRow) -> some View {
@@ -249,7 +265,18 @@ private struct CommunityListing: View {
         }
     }
 
-    @MainActor private func load(_ key: String) async throws {
+    @MainActor private func reload(pull: Bool = false) async {
+        let key = loadKey
+        guard name != "feed.read", let request = loadRequest.begin(scope: key, pull: pull) else { return }
+        defer { loadRequest.finish(request) }
+        do {
+            try await load(key, request: request, shuffle: pull && name == "feed")
+        } catch {
+            if loadRequest.current == request && key == loadKey && !Task.isCancelled { failure = error.localizedDescription }
+        }
+    }
+
+    @MainActor private func load(_ key: String, request: UUID, shuffle: Bool) async throws {
         let api = app.api
         let me = api.userID
         var entries: [CommunityRow] = []
@@ -295,9 +322,11 @@ private struct CommunityListing: View {
             }
         }
         try Task.checkCancellation()
-        guard key == loadKey, me == api.userID else { return }
+        guard loadRequest.current == request, key == loadKey, me == api.userID else { return }
+        let previousFirst = shuffle ? listedItems.first?.id : nil
         loadedSafetyRevision = app.safetyRevision
         rows = activity ? entries : Array(entries.prefix(limit))
+        if shuffle { feedOrder.shuffle(listedItems, replacing: previousFirst) }
         more = !activity && entries.count > limit
         comments = notes; profiles = people; follows = followed; failure = ""; loaded = true
         if name == "feed" { app.didRefreshRoot("feed") }
@@ -320,8 +349,7 @@ private struct CommunityListing: View {
         }.communityCard()
     }
 
-    private func reading(_ i: Int) -> some View {
-        let story = readings[i]
+    private func reading(_ story: JournalStory) -> some View {
         return VStack(alignment: .leading, spacing: 10) {
             HStack { NativeArt("icon", 1).scaledToFill().frame(width: 42, height: 42).clipShape(Circle()); VStack(alignment: .leading) { Text("MiNa Journal").bold(); Text("Bedtime reading").font(.caption) } }
             Text(story.summary)
@@ -334,6 +362,7 @@ private struct CommunityListing: View {
                     }
                     .contentShape(RoundedRectangle(cornerRadius:16))
             }.buttonStyle(.plain)
+                .accessibilityIdentifier("journal-reading-" + story.id)
             if name == "feed.read" { Text(story.body) }
         }.padding(.vertical,8).overlay(alignment: .bottom) { Divider() }
     }
@@ -546,12 +575,12 @@ private struct CommunityComment: View {
                 Button("Reply", action: reply).font(.caption.weight(.semibold)).frame(minWidth: 44, minHeight: 44)
                     .disabled(sending || blocking)
                 if canModerate {
-                    Menu {
-                        Button("Report comment") { report(CommunityReportTarget(id: note.id, kind: "comment", owner: owner)) }
+                    PopupMenu("Comment options") {
+                        PopupAction("Report comment", "flag") { report(CommunityReportTarget(id: note.id, kind: "comment", owner: owner)) }
                         if !profile.isEmpty {
-                            Button("Report author") { report(CommunityReportTarget(id: owner, kind: "profile", owner: owner)) }
+                            PopupAction("Report author", "person.crop.circle.badge.exclamationmark") { report(CommunityReportTarget(id: owner, kind: "profile", owner: owner)) }
                         }
-                        Button("Block author", role: .destructive) { confirmingBlock = true }
+                        PopupAction("Block author", "person.crop.circle.badge.minus", role: .destructive) { confirmingBlock = true }
                     } label: {
                         Image(systemName: "ellipsis").frame(width: 44, height: 44)
                     }.accessibilityLabel("More comment options").disabled(blocking || sending)
@@ -560,8 +589,8 @@ private struct CommunityComment: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.leading, note.parentID.isEmpty ? 0 : 24)
-        .confirmationDialog("Block " + name + "?", isPresented: $confirmingBlock, titleVisibility: .visible) {
-            Button("Block author", role: .destructive) {
+        .popupDialog("Block " + name + "?", isPresented: $confirmingBlock) {
+            PopupAction("Block author", "person.crop.circle.badge.minus", role: .destructive) {
                 guard canModerate, !blocking else { return }
                 blocking = true
                 Task {
@@ -570,64 +599,6 @@ private struct CommunityComment: View {
                     catch { issue(error.localizedDescription) }
                 }
             }
-            Button("Cancel", role: .cancel) {}
-        }
-    }
-}
-
-private struct CommunityReportSheet: View {
-    @EnvironmentObject var app: MiNaAppModel
-    @Environment(\.dismiss) private var dismiss
-    let target: CommunityReportTarget
-    let accepted: () -> Void
-    @State private var reason = "Harassment"
-    @State private var details = ""
-    @State private var operation = UUID()
-    @State private var busy = false
-    @State private var failure = ""
-    @State private var receipt: String?
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                if let receipt {
-                    Text("Report received").font(.title2.bold())
-                    Text("Receipt " + String(receipt.prefix(8)))
-                    Button("OK") { dismiss() }.buttonStyle(.borderedProminent)
-                } else {
-                    Text("Report this " + target.kind).font(.title2.bold())
-                    Picker("Reason", selection: $reason) {
-                        ForEach(["Harassment", "Sexual content", "Harmful content", "Privacy concern", "Spam", "Other"], id: \.self) { Text($0) }
-                    }
-                    TextField("Additional details (optional)", text: $details, axis: .vertical)
-                        .onChange(of: details) { value in
-                            if value.count > 950 { details = String(value.prefix(950)) }
-                        }
-                    Button("Submit report", action: submit).buttonStyle(.borderedProminent)
-                    Button("Cancel") { dismiss() }
-                }
-            }.padding(22).frame(maxWidth: .infinity, alignment: .leading).disabled(busy)
-        }
-        .background { NativeArt("activity",1).ignoresSafeArea() }
-        .minaAlert(failure)
-        .presentationDetents([.medium,.large])
-        .interactiveDismissDisabled(busy)
-    }
-
-    private func submit() {
-        guard !busy, receipt == nil else { return }
-        guard !app.api.userID.isEmpty, app.api.userID != target.owner else {
-            failure = "You can only report content from another listener."
-            return
-        }
-        busy = true
-        failure = ""
-        Task {
-            defer { busy = false }
-            do {
-                receipt = try await app.api.report(target.id, kind: target.kind, reason: reason, details: details, operation: operation)
-                accepted()
-            } catch { failure = error.localizedDescription }
         }
     }
 }
@@ -698,6 +669,7 @@ private struct CommunityEntry: View {
             }
             if !postDetail {
                 Button { open() } label: { Text(caption).font(.body).multilineTextAlignment(.leading) }.buttonStyle(.plain)
+                    .accessibilityIdentifier("community-entry-" + id)
                 entryMedia
                 HStack {
                     let saved = row["saved"] as? Bool ?? false
@@ -710,21 +682,20 @@ private struct CommunityEntry: View {
             }
         }.padding(.vertical, postDetail ? 0 : 6)
         .overlay(alignment: .bottom) { if !postDetail { Divider() } }
-        .confirmationDialog("Entry options", isPresented: postDetail ? $detailOptions : $options, titleVisibility: .hidden) {
-            if owner == me { Button("Delete " + kind, role: .destructive) { confirm = "Delete" } }
+        .popupDialog(dream ? "Dream options" : "Post options", isPresented: postDetail ? $detailOptions : $options) {
+            if owner == me { PopupAction("Delete " + kind, "trash", role: .destructive) { confirm = "Delete" } }
             else if canModerate {
-                Button("Report " + kind) { report(CommunityReportTarget(id: id, kind: kind, owner: owner)) }
+                PopupAction("Report " + kind, "flag") { report(CommunityReportTarget(id: id, kind: kind, owner: owner)) }
                 if !profile.isEmpty {
-                    Button("Report author") { report(CommunityReportTarget(id: owner, kind: "profile", owner: owner)) }
-                    Button("View author profile") { app.go("person",owner) }
+                    PopupAction("Report author", "person.crop.circle.badge.exclamationmark") { report(CommunityReportTarget(id: owner, kind: "profile", owner: owner)) }
+                    PopupAction("View author profile", "person.crop.circle") { app.go("person",owner) }
                 }
-                Button("Block author", role: .destructive) { confirm = "Block" }
+                PopupAction("Block author", "person.crop.circle.badge.minus", role: .destructive) { confirm = "Block" }
             }
-            Button("Cancel", role: .cancel) {}
         }
-        .confirmationDialog(confirm == "Block" ? "Block this author?" : "Delete this " + kind + "?", isPresented: Binding(get: { !confirm.isEmpty }, set: { if !$0 { confirm = "" } }), titleVisibility: .visible) {
+        .popupDialog(confirm == "Block" ? "Block this author?" : "Delete this " + kind + "?", isPresented: Binding(get: { !confirm.isEmpty }, set: { if !$0 { confirm = "" } })) {
             if confirm == "Block" {
-                Button("Block author", role: .destructive) {
+                PopupAction("Block author", "person.crop.circle.badge.minus", role: .destructive) {
                     guard canModerate else { return }
                     run {
                         let name = profile.communityString("name")
@@ -732,13 +703,12 @@ private struct CommunityEntry: View {
                     }
                 }
             } else {
-                Button("Delete " + kind, role: .destructive) { run {
+                PopupAction("Delete " + kind, "trash", role: .destructive) { run {
                     guard owner == me, !me.isEmpty else { throw MiNaIssue("Only the author can delete this entry.") }
                     try await app.api.deleteEntry(id)
                     removed()
                 } }
             }
-            Button("Cancel", role: .cancel) {}
         }
     }
     private func actionIcon(_ group: String, _ index: Int, _ text: String) -> some View {
